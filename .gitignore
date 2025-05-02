@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.env
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+*.log
+
+# VSCode
+.vscode/
+
+# Node.js
+ui/node_modules/
+ui/.next/
+ui/.env
+ui/.env.*
+ui/.turbo/
+ui/.eslintcache
+ui/.output/
+ui/.vercel/
+ui/.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Others
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Ignore local MongoDB data
+/data/
+
+# Ignore Docker volumes
+volumes/
+
+# Ignore test output
+*.coverage
+coverage/
+
+# Ignore logs
+*.log
+logs/
+
+# Ignore Jupyter Notebooks checkpoints
+.ipynb_checkpoints/

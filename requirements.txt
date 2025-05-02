@@ -1,0 +1,35 @@
+# FastAPI and server dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+pydantic==2.4.2
+
+# RAG and ML dependencies
+langchain==0.0.340
+sentence-transformers>=2.7.0 # Upgraded version
+transformers>=4.36.0 # Ensure compatibility with newer sentence-transformers
+huggingface-hub>=0.20.0 # Allow newer version
+tokenizers>=0.15.2
+numpy>=1.26.4
+accelerate # Explicitly add accelerate
+
+# Document processing
+pdf2image==1.16.3
+pytesseract==0.3.10
+Pillow==10.1.0
+PyPDF2==3.0.1
+
+# Storage and messaging
+kafka-python>=2.0.2 # Use latest kafka-python
+six>=1.16.0
+minio==7.2.0
+pymongo==4.6.0
+motor==3.3.1
+
+# Async dependencies
+aiofiles==23.2.1
+asyncio==3.4.3
+httpx>=0.24.0
+
+# Environment and configuration
+python-dotenv==1.0.0

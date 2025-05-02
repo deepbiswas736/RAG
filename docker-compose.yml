@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:8.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    volumes:
+      - mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js
+    command: >
+      mongod --auth --bind_ip_all
+    restart: always
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server --console-address ":9001" /data
+
+  zookeeper:
+    image: wurstmeister/zookeeper
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: localhost
+      KAFKA_CREATE_TOPICS: "rag_queries:1:1"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - zookeeper
+
+  poppler:
+    image: minidocks/poppler:latest
+    volumes:
+      - ./data/pdf_processing:/data
+    command: tail -f /dev/null  # Keep container running
+    healthcheck:
+      test: ["CMD", "which", "pdftoppm"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  tesseract:
+    image: tesseractshadow/tesseract4re:latest
+    volumes:
+      - ./data/ocr_processing:/app/tesseractshadow
+    command: tail -f /dev/null  # Keep container running
+    healthcheck:
+      test: ["CMD", "tesseract", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://admin:password@mongodb:27017/?authSource=admin
+      - MONGODB_DB_NAME=rag_db
+      - MONGODB_VECTOR_INDEX_NAME=vector_index
+      - VECTOR_DIMENSION=384
+      - VECTOR_METRIC=cosine
+      - MINIO_URL=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=phi
+      - POPPLER_SERVICE=poppler
+      - TESSERACT_SERVICE=tesseract
+    volumes:
+      - .:/app
+      - ./data/pdf_processing:/app/pdf_processing
+      - ./data/ocr_processing:/app/ocr_processing
+    depends_on:
+      - mongodb
+      - minio
+      - kafka
+      - ollama
+      - poppler
+      - tesseract
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  minio_data:
+  ollama_data:
+  ocr_processing:
