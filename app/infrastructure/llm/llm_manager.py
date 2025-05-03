@@ -115,6 +115,37 @@ class LLMManager:
             self.fallback_mode = True
             yield self._get_fallback_response(query, context)
 
+    async def generate_summary(self, summary_prompt: str) -> str:
+        """Generate a summary response based on the provided summary prompt.
+        This is used specifically for combining individual chunk responses."""
+        if self.fallback_mode:
+            return f"Unable to generate summary: LLM service is in fallback mode."
+            
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/api/generate",
+                    json={
+                        "model": self.model,
+                        "prompt": summary_prompt,
+                        "stream": False
+                    },
+                    timeout=self.request_timeout
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    return result["response"]
+                elif response.status_code == 404:
+                    logger.error(f"API endpoint not found: {self.base_url}/api/generate")
+                    self.fallback_mode = True
+                    return "Error: Unable to generate summary. LLM service API endpoint not found."
+                else:
+                    logger.error(f"LLM request failed with status {response.status_code}: {response.text}")
+                    return f"Error: Unable to generate summary from LLM. Status: {response.status_code}"
+        except Exception as e:
+            logger.error(f"Error generating summary: {type(e).__name__}: {e}")
+            return f"Error: Failed to generate summary: {str(e)}"
+
     def _format_context(self, context: List[Dict]) -> str:
         """Format context into a string for the prompt."""
         return "\n".join([

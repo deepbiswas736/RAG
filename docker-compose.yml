@@ -2,20 +2,20 @@ version: '3.8'
 
 services:
   mongodb:
-    image: mongo:8.0
+    image: mongodb/mongodb-atlas-local:latest # Revert to standard mongo image
     ports:
       - "27017:27017"
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_USERNAME=user
       - MONGO_INITDB_ROOT_PASSWORD=password
     volumes:
-      - mongodb_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js
-    command: >
-      mongod --auth --bind_ip_all
+      - mongo_app_data:/data/db # Changed volume name here
+      - mongodb_config:/data/configdb # Added mapping for config volume
+      - ./mongo-init:/docker-entrypoint-initdb.d # Add this mount for init scripts
     restart: always
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      # Updated healthcheck to include authentication
+      test: ["CMD", "mongosh", "mongodb://user:password@localhost:27017/rag_db?authSource=admin&directConnection=true", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -54,7 +54,7 @@ services:
       KAFKA_CREATE_TOPICS: "rag_queries:1:1"
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - //var/run/docker.sock:/var/run/docker.sock # Correct path for Windows
     depends_on:
       - zookeeper
 
@@ -85,7 +85,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MONGODB_URL=mongodb://admin:password@mongodb:27017/?authSource=admin
+      - MONGODB_URL=mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true
       - MONGODB_DB_NAME=rag_db
       - MONGODB_VECTOR_INDEX_NAME=vector_index
       - VECTOR_DIMENSION=384
@@ -111,7 +111,7 @@ services:
       - tesseract
 
 volumes:
-  mongodb_data:
+  mongo_app_data: # Changed volume name here
   mongodb_config:
   minio_data:
   ollama_data:

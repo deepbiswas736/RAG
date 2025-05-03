@@ -10,13 +10,13 @@ export default function QueryPage() {
         <label className="font-semibold">Sync Query</label>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
         <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">Sync Query</button>
-        {syncResult && <div className="mt-2 text-sm">Sync Result: {syncResult}</div>}
+        {syncResult && <div className="mt-2 text-base font-medium text-gray-800">Sync Answer: {syncResult}</div>}
       </form>
       <form onSubmit={handleAsyncQuery} className="mb-4 flex flex-col gap-2">
         <label className="font-semibold">Async Query</label>
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
         <button type="submit" className="px-4 py-2 bg-purple-600 text-white rounded">Async Query</button>
-        {asyncResult && <div className="mt-2 text-sm">Async Result: {asyncResult}</div>}
+        {asyncResult && <div className="mt-2 text-base font-medium text-gray-800">Async Answer: {asyncResult}</div>}
       </form>
     </div>
   );

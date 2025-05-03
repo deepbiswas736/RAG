@@ -1,9 +1,12 @@
+"use client";
+
 import { useRef, useState, useEffect } from "react";
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [syncQuery, setSyncQuery] = useState("");
+  const [asyncQuery, setAsyncQuery] = useState("");
   const [syncResult, setSyncResult] = useState("");
   const [asyncResult, setAsyncResult] = useState("");
   const [asyncId, setAsyncId] = useState("");
@@ -39,7 +42,7 @@ export default function Home() {
     const res = await fetch("/api/query/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query: syncQuery }),
     });
     setSyncResult(await res.text());
   }
@@ -51,7 +54,7 @@ export default function Home() {
     const res = await fetch("/api/query/async", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query: asyncQuery }),
     });
     const data = await res.json();
     setAsyncId(data.query_id);
@@ -92,13 +95,13 @@ export default function Home() {
       </form>
       <form onSubmit={handleSyncQuery} className="mb-4 flex flex-col gap-2">
         <label className="font-semibold">Sync Query</label>
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
+        <input value={syncQuery} onChange={e => setSyncQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
         <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">Sync Query</button>
         {syncResult && <div className="mt-2 text-sm">Sync Result: {syncResult}</div>}
       </form>
       <form onSubmit={handleAsyncQuery} className="mb-4 flex flex-col gap-2">
         <label className="font-semibold">Async Query</label>
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
+        <input value={asyncQuery} onChange={e => setAsyncQuery(e.target.value)} placeholder="Enter query" className="border px-2 py-1" />
         <button type="submit" className="px-4 py-2 bg-purple-600 text-white rounded">Async Query</button>
         {asyncResult && <div className="mt-2 text-sm">Async Result: {asyncResult}</div>}
       </form>

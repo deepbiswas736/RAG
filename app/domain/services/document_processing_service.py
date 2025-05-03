@@ -527,9 +527,11 @@ class DocumentProcessingService:
                              if not page.extract_text() or page.extract_text().isspace(): # Check *this* page specifically
                                  extraction_method = 'ocr'
 
+                        # Generate a unique ID for the chunk using UUID
+                        chunk_id = str(uuid.uuid4())
 
                         chunk = Chunk(
-                            id="",
+                            id=chunk_id,  # Set a unique ID here
                             content=page_text,
                             embedding=Embedding.create(embedding_vector.tolist()),
                             metadata=DocumentMetadata.from_dict({
@@ -541,7 +543,7 @@ class DocumentProcessingService:
                             source=f"{document.title} (Page {page_num})"
                         )
                         chunks.append(chunk)
-                        logger.info(f"Created chunk for page {page_num} with {len(page_text)} chars (Method: {extraction_method})")
+                        logger.info(f"Created chunk for page {page_num} with {len(page_text)} chars (Method: {extraction_method}, ID: {chunk_id})")
                     except Exception as e:
                         logger.error(f"Failed to encode text chunk for page {page_num}: {e}", exc_info=True)
 
@@ -641,8 +643,11 @@ class DocumentProcessingService:
                 if start >= actual_end: start = actual_end # Ensure progress
                 continue
 
+            # Generate a unique ID for the chunk using UUID
+            chunk_id = str(uuid.uuid4())
+
             chunk = Chunk(
-                id="",
+                id=chunk_id,  # Set a unique ID here
                 content=chunk_text,
                 embedding=Embedding.create(embedding_vector.tolist()),
                 metadata=DocumentMetadata.from_dict({
