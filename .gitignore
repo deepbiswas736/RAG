@@ -55,3 +55,63 @@ logs/
 
 # Ignore Jupyter Notebooks checkpoints
 .ipynb_checkpoints/
+
+# Mobile - React Native
+## Xcode
+mobile/RagMobileApp/build/
+mobile/RagMobileApp/*.pbxuser
+!mobile/RagMobileApp/default.pbxuser
+mobile/RagMobileApp/*.mode1v3
+!mobile/RagMobileApp/default.mode1v3
+mobile/RagMobileApp/*.mode2v3
+!mobile/RagMobileApp/default.mode2v3
+mobile/RagMobileApp/*.perspectivev3
+!mobile/RagMobileApp/default.perspectivev3
+mobile/RagMobileApp/xcuserdata
+mobile/RagMobileApp/*.xccheckout
+mobile/RagMobileApp/*.moved-aside
+mobile/RagMobileApp/DerivedData
+mobile/RagMobileApp/*.hmap
+mobile/RagMobileApp/*.ipa
+mobile/RagMobileApp/*.xcuserstate
+mobile/RagMobileApp/**/.xcode.env.local
+
+## Android/IntelliJ
+mobile/RagMobileApp/.idea
+mobile/RagMobileApp/.gradle
+mobile/RagMobileApp/local.properties
+mobile/RagMobileApp/*.iml
+mobile/RagMobileApp/*.hprof
+mobile/RagMobileApp/.cxx/
+mobile/RagMobileApp/*.keystore
+!mobile/RagMobileApp/debug.keystore
+mobile/RagMobileApp/.kotlin/
+
+## node.js
+mobile/RagMobileApp/node_modules/
+mobile/RagMobileApp/npm-debug.log
+mobile/RagMobileApp/yarn-error.log
+
+## fastlane
+mobile/RagMobileApp/**/fastlane/report.xml
+mobile/RagMobileApp/**/fastlane/Preview.html
+mobile/RagMobileApp/**/fastlane/screenshots
+mobile/RagMobileApp/**/fastlane/test_output
+
+## Bundle artifact
+mobile/RagMobileApp/*.jsbundle
+
+## Ruby / CocoaPods
+mobile/RagMobileApp/**/Pods/
+mobile/RagMobileApp/vendor/bundle/
+
+## Temporary files created by Metro
+mobile/RagMobileApp/.metro-health-check*
+
+## Yarn
+mobile/RagMobileApp/.yarn/*
+!mobile/RagMobileApp/.yarn/patches
+!mobile/RagMobileApp/.yarn/plugins
+!mobile/RagMobileApp/.yarn/releases
+!mobile/RagMobileApp/.yarn/sdks
+!mobile/RagMobileApp/.yarn/versions
