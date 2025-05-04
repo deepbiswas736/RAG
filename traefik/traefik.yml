@@ -1,0 +1,31 @@
+# Traefik Global Configuration
+api:
+  insecure: true  # Enable dashboard in development (disable in production)
+  dashboard: true
+
+# Log level configuration
+log:
+  level: INFO
+
+# Enable Docker provider for service discovery
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: traefik-public
+
+# Entrypoints configuration
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+# Service discovery and registration configuration
+certificatesResolvers:
+  letsencryptresolver:
+    acme:
+      email: "admin@example.com"  # Change to your email
+      storage: "acme.json"
+      httpChallenge:
+        entryPoint: web

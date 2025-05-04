@@ -1,0 +1,24 @@
+http:
+  middlewares:
+    # Global service registry middleware
+    service-registry:
+      headers:
+        customRequestHeaders:
+          X-Service-Registry: "true"
+    
+    # Service-specific middlewares for rewriting paths
+    rag-api-strip:
+      stripPrefix:
+        prefixes:
+          - "/api/rag"
+    
+    doc-processor-strip:
+      stripPrefix:
+        prefixes:
+          - "/api/document-processor"
+
+  # Define service registry
+  services:
+    service-registry:
+      loadBalancer:
+        passHostHeader: true

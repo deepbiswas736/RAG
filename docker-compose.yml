@@ -1,6 +1,29 @@
 version: '3.8'
 
 services:
+  # API Gateway and Service Registry
+  traefik:
+    image: traefik:v2.10
+    ports:
+      - "80:80"     # HTTP
+      - "443:443"   # HTTPS (for future use)
+      - "8080:8080" # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik:/etc/traefik
+    command:
+      - "--api.insecure=true"  # Enable dashboard without auth (remove in production)
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8080/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   mongodb:
     image: mongodb/mongodb-atlas-local:latest # Revert to standard mongo image
     ports:
@@ -82,8 +105,12 @@ services:
 
   app:
     build: .
-    ports:
-      - "8000:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=PathPrefix(`/api/rag`)"
+      - "traefik.http.services.app.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.app-stripprefix.stripprefix.prefixes=/api/rag"
+      - "traefik.http.routers.app.middlewares=app-stripprefix"
     environment:
       - MONGODB_URL=mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true
       - MONGODB_DB_NAME=rag_db
@@ -98,6 +125,7 @@ services:
       - OLLAMA_MODEL=phi
       - POPPLER_SERVICE=poppler
       - TESSERACT_SERVICE=tesseract
+      - BASE_PATH=/api/rag # Add base path for the service
     volumes:
       - .:/app
       - ./data/pdf_processing:/app/pdf_processing
@@ -109,6 +137,30 @@ services:
       - ollama
       - poppler
       - tesseract
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  document-processor:
+    build: ./document-processor
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.docproc.rule=PathPrefix(`/api/document-processor`)"
+      - "traefik.http.services.docproc.loadbalancer.server.port=8080" # Assuming Go service runs on 8080
+      - "traefik.http.middlewares.docproc-stripprefix.stripprefix.prefixes=/api/document-processor"
+      - "traefik.http.routers.docproc.middlewares=docproc-stripprefix"
+    volumes:
+      - ./document-processor:/app
+      - ./data/fallback_storage:/app/output
+    depends_on:
+      - traefik
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/detect"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   mongo_app_data: # Changed volume name here
@@ -116,3 +168,4 @@ volumes:
   minio_data:
   ollama_data:
   ocr_processing:
+  fallback_storage:

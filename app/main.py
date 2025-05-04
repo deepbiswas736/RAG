@@ -1,13 +1,15 @@
-from fastapi import FastAPI, UploadFile, BackgroundTasks, Form, Body, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, UploadFile, BackgroundTasks, Form, Body, HTTPException, Request
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
+from typing import List, Dict, Optional
 import asyncio
 import io
 import os
 import sys
 import logging
 import uvicorn
+import socket
+import platform
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -49,8 +51,16 @@ from pydantic import BaseModel
 class QueryRequest(BaseModel):
     query: str
 
+# Define service constants
+SERVICE_NAME = "rag-api"
+SERVICE_VERSION = "1.0.0"
+
 # Create the FastAPI app instance
-app = FastAPI()
+app = FastAPI(
+    title="RAG API Service",
+    description="Retrieval-Augmented Generation API",
+    version=SERVICE_VERSION
+)
 
 # Configure CORS middleware
 app.add_middleware(
@@ -80,6 +90,35 @@ async def root():
     """Root endpoint to verify API is running"""
     logger.info("Root endpoint called")
     return {"status": "ok", "message": "RAG API is operational"}
+
+# Service registry endpoints
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for service discovery"""
+    return {"status": "healthy"}
+
+@app.get("/service-info")
+async def service_info(request: Request):
+    """Service information endpoint for service registry"""
+    hostname = socket.gethostname()
+    
+    # Get base URL from environment or request
+    base_url = os.getenv("BASE_PATH", "")
+    
+    return {
+        "service": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "hostname": hostname,
+        "platform": platform.platform(),
+        "endpoints": [
+            f"{base_url}/documents/upload",
+            f"{base_url}/document/upload",
+            f"{base_url}/query/async",
+            f"{base_url}/query/sync",
+            f"{base_url}/documents/list",
+            f"{base_url}/diagnostics/vector-index"
+        ]
+    }
 
 @app.on_event("startup")
 async def startup_event():
