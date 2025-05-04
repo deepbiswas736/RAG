@@ -132,15 +132,26 @@ func (s *Server) ConvertToPDFHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	// Detect the format if not provided
+	// Get format from form data if provided
+	if formatValue := r.FormValue("format"); formatValue != "" {
+		// Log that we received a format parameter
+		fmt.Printf("Received format parameter: %s\n", formatValue)
+		document.Format = model.Format(formatValue)
+	}
+
+	// Detect the format if still empty
 	if document.Format == "" {
+		fmt.Println("No format specified, attempting to detect automatically...")
 		format, err := s.formatDetector.DetectFormatFromBytes(fileBytes)
 		if err != nil {
 			responseWithError(w, "Failed to detect format", err)
 			return
 		}
 		document.Format = format
+		fmt.Printf("Detected format: %s\n", document.Format)
 	}
+
+	fmt.Printf("Converting document: %s (format: %s)\n", document.Name, document.Format)
 
 	// Create a buffer for the PDF output
 	var pdfBuf bytes.Buffer

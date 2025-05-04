@@ -24,6 +24,9 @@ class MongoDBDocumentRepository(DocumentRepository):
         self.vector_index_name = os.getenv('MONGODB_VECTOR_INDEX_NAME', 'vector_index')
         self.vector_dimension = int(os.getenv('VECTOR_DIMENSION', '384'))
         self.vector_metric = os.getenv('VECTOR_METRIC', 'cosine')
+        # Replace similarity threshold with top_k results parameter
+        self.similarity_threshold = float(os.getenv('SIMILARITY_THRESHOLD', '0.0'))  # Keeping for backward compatibility
+        self.top_k_results = int(os.getenv('TOP_K_RESULTS', '5'))  # Default to returning top 5 results
         
         self.client = None
         self.db = None
@@ -32,7 +35,7 @@ class MongoDBDocumentRepository(DocumentRepository):
         self.vector_search_available = False # Default to False until verified
         self.vector_index_type = None # To store 'atlas' or 'native'
         
-        logger.info(f"Initializing MongoDB repository with URL: {self.mongodb_url}, DB: {self.db_name}")
+        logger.info(f"Initializing MongoDB repository with URL: {self.mongodb_url}, DB: {self.db_name}, Top K Results: {self.top_k_results}")
 
     async def initialize(self):
         """Initialize the repository - should be called at app startup"""
@@ -72,10 +75,11 @@ class MongoDBDocumentRepository(DocumentRepository):
             logger.error("Cannot ensure indexes without a valid DB connection.")
             return
         try:
-            # Ensure standard indexes first
-            await self.documents.create_index([("document_id", 1)], unique=True)
-            await self.chunks.create_index([("document_id", 1)])
-            await self.chunks.create_index([("chunk_id", 1)], unique=True)
+            # Ensure standard indexes first - use document_id instead of the _id field
+            # Use sparse=True to allow null values in the index
+            await self.documents.create_index([("document_id", 1)], unique=True, sparse=True)
+            await self.chunks.create_index([("metadata.document_id", 1)], sparse=True)
+            await self.chunks.create_index([("chunk_id", 1)], unique=True, sparse=True)
             await self._ensure_vector_index() # Ensure vector index after basic indexes
             logger.info("Successfully ensured standard indexes.")
         except OperationFailure as e:
@@ -181,15 +185,25 @@ class MongoDBDocumentRepository(DocumentRepository):
              logger.error("Attempted to save document, but MongoDB collection is not initialized.")
              raise RuntimeError("MongoDB document collection is not available.")
              
+        # Generate a document_id if it's not present
+        document_id = document.id if document.id else str(datetime.now().timestamp())
+        
         doc_dict = {
+            "document_id": document_id,  # Add document_id field explicitly
             "title": document.title,
             "content": document.content,
             "metadata": document.metadata.__dict__,
             "created_at": document.created_at,
             "updated_at": document.updated_at
         }
-        result = await self.documents.insert_one(doc_dict)
-        return str(result.inserted_id)
+        
+        try:
+            result = await self.documents.insert_one(doc_dict)
+            logger.info(f"Successfully saved document with ID: {document_id}")
+            return document_id
+        except Exception as e:
+            logger.error(f"Error saving document: {e}")
+            raise
 
     async def save_chunks(self, chunks: List[Chunk]) -> List[str]:
          # Add an explicit check
@@ -202,10 +216,15 @@ class MongoDBDocumentRepository(DocumentRepository):
              # Optionally raise an error or handle differently
              return [] 
              
-        chunk_dicts = [
-            {
-                # Ensure _id is generated if not provided, or handle potential duplicates
-                "chunk_id": chunk.id, # Add chunk_id mapping
+        chunk_dicts = []
+        for chunk in chunks:
+            # Make sure we have a valid document_id in metadata
+            if not chunk.metadata.__dict__.get('document_id'):
+                logger.warning(f"Chunk {chunk.id} missing document_id in metadata. This could cause retrieval issues.")
+                # You might want to raise an error or add a placeholder document_id here
+                
+            chunk_dicts.append({
+                "chunk_id": chunk.id,
                 "content": chunk.content,
                 "embedding": {
                     "vector": chunk.embedding.vector,
@@ -213,9 +232,8 @@ class MongoDBDocumentRepository(DocumentRepository):
                 },
                 "metadata": chunk.metadata.__dict__,
                 "source": chunk.source
-            }
-            for chunk in chunks
-        ]
+            })
+            
         if not chunk_dicts:
             return []
             
@@ -229,14 +247,18 @@ class MongoDBDocumentRepository(DocumentRepository):
             # Handle potential bulk write errors if needed
             return []
 
-    async def search_similar(self, embedding: Embedding, limit: int = 5) -> List[Chunk]:
+    async def search_similar(self, embedding: Embedding, limit: int = None) -> List[Chunk]:
+        # Use top_k_results as the default limit if none is provided
+        if limit is None:
+            limit = self.top_k_results
+            
         # Directly use vector search without fallback
         if not self.vector_search_available:
             logger.error("Vector search is not available. Cannot perform search.")
             # Depending on requirements, could raise an error here
             return [] 
             
-        logger.info("Performing vector search using MongoDB 8+ native capabilities.")
+        logger.info(f"Performing vector search to find top {limit} most similar documents")
         chunks = await self._search_vector(embedding, limit)
         return chunks
 
@@ -250,12 +272,11 @@ class MongoDBDocumentRepository(DocumentRepository):
         try:
             if self.vector_index_type == 'atlas':
                 logger.info(f"Performing vector search using Atlas Search ($search) index '{self.vector_index_name}'.")
-                # Use knnBeta directly under $search - this works based on our diagnostic results
                 pipeline = [
                     {
                         "$search": {
                             "index": self.vector_index_name,
-                            "knnBeta": { # Changed from knnVector to knnBeta which works with Atlas Local
+                            "knnBeta": {
                                 "vector": embedding.vector,
                                 "path": "embedding.vector",
                                 "k": limit
@@ -297,19 +318,23 @@ class MongoDBDocumentRepository(DocumentRepository):
                             "embedding": 1,
                             "score": { "$meta": "vectorSearchScore" }
                         }
-                    }
+                    },
+                    { "$limit": limit }
                 ]
             else:
                 logger.error(f"Unknown vector index type '{self.vector_index_type}'. Cannot perform search.")
                 return []
 
-            logger.info(f"Executing vector search pipeline with index '{self.vector_index_name}' for {len(embedding.vector)} dimensions.")
+            logger.info(f"Executing vector search pipeline with index '{self.vector_index_name}' for {len(embedding.vector)} dimensions without similarity threshold filtering.")
             cursor = self.chunks.aggregate(pipeline, maxTimeMS=15000) # Increased timeout slightly
             results = await cursor.to_list(length=limit)
 
-            # ... rest of result processing code remains the same ...
             chunks_found = []
             for doc in results:
+                # Log the score for debugging
+                score = doc.get("score", 0)
+                logger.debug(f"Document {doc.get('_id')} similarity score: {score}")
+                
                 # Ensure embedding exists and is valid before creating Chunk object
                 doc_embedding_data = doc.get("embedding")
                 if doc_embedding_data and "vector" in doc_embedding_data:
@@ -328,12 +353,11 @@ class MongoDBDocumentRepository(DocumentRepository):
                          logger.error(f"Error processing document {doc.get('_id')} during chunk creation: {e}")
                 else:
                      logger.warning(f"Document {doc.get('_id')} missing valid embedding data.")
-
             
             if chunks_found:
-                logger.info(f"Vector search found {len(chunks_found)} results.")
+                logger.info(f"Vector search found {len(chunks_found)} results from top {limit} most similar documents.")
             else:
-                logger.warning("Vector search returned no results.")
+                logger.warning(f"Vector search returned no results. Check your vector search configuration.")
                 
             return chunks_found
 

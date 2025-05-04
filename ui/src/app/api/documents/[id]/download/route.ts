@@ -8,6 +8,7 @@ export async function GET(
   const backendUrl = process.env.BACKEND_URL || `http://localhost:8000/documents/${documentId}/download`;
 
   try {
+    console.log('Fetching document from backend:', backendUrl);
     const res = await fetch(backendUrl);
     
     if (!res.ok) {

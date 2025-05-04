@@ -50,6 +50,17 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_NUM_GPU=32  # Optimized for 6GB VRAM - RTX 3050
+      - CUDA_VISIBLE_DEVICES=0
 
   minio:
     image: minio/minio
@@ -117,6 +128,7 @@ services:
       - MONGODB_VECTOR_INDEX_NAME=vector_index
       - VECTOR_DIMENSION=384
       - VECTOR_METRIC=cosine
+      - SIMILARITY_THRESHOLD=0.7
       - MINIO_URL=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin

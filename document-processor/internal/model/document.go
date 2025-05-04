@@ -19,6 +19,9 @@ const (
 	FormatTXT  Format = "txt"
 	FormatMD   Format = "md"
 	FormatPDF  Format = "pdf"
+	FormatPNG  Format = "png"
+	FormatJPEG Format = "jpeg"
+	FormatJPG  Format = "jpg"
 )
 
 // Document represents a document to be processed

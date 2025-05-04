@@ -47,6 +47,31 @@ class BlobStore:
             print(f"Error uploading file: {e}")
             raise
 
+    async def upload_binary(self, content: bytes, filename: str) -> str:
+        """Upload binary content to blob storage and return its path"""
+        try:
+            content_stream = io.BytesIO(content)
+            
+            # Generate a unique object name based on the filename
+            object_name = filename
+            
+            # Determine content type based on filename
+            content_type = "application/pdf"  # Default to PDF since we're converting everything to PDF
+            
+            # Upload to MinIO
+            self.client.put_object(
+                self.bucket_name,
+                object_name,
+                content_stream,
+                length=len(content),
+                content_type=content_type
+            )
+            
+            return f"{self.bucket_name}/{object_name}"
+        except Exception as e:
+            print(f"Error uploading binary content: {e}")
+            raise
+
     async def get_file(self, file_path: str) -> Optional[BinaryIO]:
         """Retrieve a file from blob storage"""
         try:

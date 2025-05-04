@@ -1,7 +1,7 @@
-from fastapi import FastAPI, UploadFile, BackgroundTasks, Form, Body, HTTPException, Request
+from fastapi import FastAPI, UploadFile, BackgroundTasks, Form, Body, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Union
 import asyncio
 import io
 import os
@@ -10,11 +10,19 @@ import logging
 import uvicorn
 import socket
 import platform
+import aiohttp
+import tempfile
+from pathlib import Path
+import mimetypes
+from bson import ObjectId
+from bson.errors import InvalidId
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
 
 # Fix imports by getting the absolute paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +62,8 @@ class QueryRequest(BaseModel):
 # Define service constants
 SERVICE_NAME = "rag-api"
 SERVICE_VERSION = "1.0.0"
+# Document processor service URL - will default to localhost if not set
+DOCUMENT_PROCESSOR_URL = os.getenv("DOCUMENT_PROCESSOR_URL", "http://localhost:8080")
 
 # Create the FastAPI app instance
 app = FastAPI(
@@ -158,64 +168,34 @@ async def shutdown_event():
 
 @app.post("/documents/upload")
 async def upload_documents(files: List[UploadFile]):
+    """Endpoint to upload multiple documents"""
     results = []
     for file in files:
-        # Store in blob storage
-        blob_path = await blob_store.upload_file(file)
-        
-        # Read file content as bytes
-        content_bytes = await file.read()
-        
-        # Create document DTO with bytes content
-        doc_dto = DocumentDTO(
-            title=file.filename,
-            content=content_bytes, # Pass bytes directly
-            metadata={
-                'file_type': file.content_type,
-                'blob_path': blob_path,
-                'source_type': 'file' # Use a more generic source type initially
-            }
-        )
-        
-        # Process and store document (ensure service handles bytes)
-        document_id = await document_service.process_and_store_document(doc_dto)
-        
-        results.append({
-            "file": file.filename,
-            "document_id": document_id,
-            "blob_path": blob_path
-        })
+        try:
+            result = await process_document_upload(file)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Error processing document upload: {file.filename}: {str(e)}")
+            results.append({
+                "file": file.filename,
+                "error": str(e),
+                "status": "failed"
+            })
     
     return results
 
 @app.post("/document/upload")
 async def upload_document(file: UploadFile):
     """Endpoint to upload a single document"""
-    # Store in blob storage
-    blob_path = await blob_store.upload_file(file)
-    
-    # Read file content as bytes
-    content_bytes = await file.read()
-    
-    # Create document DTO with bytes content
-    doc_dto = DocumentDTO(
-        title=file.filename,
-        content=content_bytes, # Pass bytes directly
-        metadata={
-            'file_type': file.content_type,
-            'blob_path': blob_path,
-            'source_type': 'file'
-        }
-    )
-    
-    # Process and store document
-    document_id = await document_service.process_and_store_document(doc_dto)
-    
-    return {
-        "file": file.filename,
-        "document_id": document_id,
-        "blob_path": blob_path
-    }
+    try:
+        result = await process_document_upload(file)
+        return result
+    except Exception as e:
+        logger.error(f"Error processing document upload: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing document upload: {str(e)}"
+        )
 
 @app.post("/query/async")
 async def async_query(query_req: QueryRequest, background_tasks: BackgroundTasks = None):
@@ -263,49 +243,66 @@ async def list_documents():
 async def delete_document(document_id: str):
     """Delete a document and its associated chunks"""
     try:
+        # Convert string ID to ObjectId
+        try:
+            obj_id = ObjectId(document_id)
+        except InvalidId:
+            raise HTTPException(status_code=400, detail="Invalid document ID format")
+
         # Get document metadata to find the blob path
-        doc = await document_repository.documents.find_one({"_id": document_id})
+        doc = await document_repository.documents.find_one({"_id": obj_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        # Extract blob path from metadata if available
-        blob_path = None
-        if doc.get("metadata") and doc["metadata"].get("blob_path"):
-            blob_path = doc["metadata"]["blob_path"]
-        
-        # Delete document from MongoDB
-        delete_result = await document_repository.documents.delete_one({"_id": document_id})
+        blob_path = doc["metadata"].get("blob_path")
+
+        # Delete document from MongoDB using ObjectId
+        delete_result = await document_repository.documents.delete_one({"_id": obj_id})
         if (delete_result.deleted_count == 0):
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Delete associated chunks
+            # This case should ideally be covered by the find_one check above,
+            # but kept for robustness.
+            raise HTTPException(status_code=404, detail="Document not found during deletion")
+
+        # Delete associated chunks - ensure metadata.document_id is stored consistently (string or ObjectId)
         await document_repository.chunks.delete_many({"metadata.document_id": document_id})
-        
+
         # Delete from blob storage if path exists
         if blob_path:
-            await blob_store.delete_file(blob_path)
-            
-        return {"success": True, "message": "Document and associated data deleted successfully"}
+            try:
+                await blob_store.delete_file(blob_path)
+            except Exception as e:
+                logger.error(f"Error deleting blob at {blob_path}: {str(e)}")
+                # Continue with the operation even if blob deletion fails
+        
+        return {"status": "success", "message": "Document and associated data deleted successfully"}
+        
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error deleting document: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
 
 @app.get("/documents/{document_id}/download")
 async def download_document(document_id: str):
     """Download a document from blob storage"""
     try:
+        # Convert string ID to ObjectId
+        try:
+            obj_id = ObjectId(document_id)
+        except InvalidId:
+            raise HTTPException(status_code=400, detail="Invalid document ID format")
+
         # Get document metadata to find the blob path
-        doc = await document_repository.documents.find_one({"_id": document_id})
+        doc = await document_repository.documents.find_one({"_id": obj_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
-            
+
         # Get blob path from metadata
         if not doc.get("metadata") or not doc["metadata"].get("blob_path"):
             raise HTTPException(status_code=404, detail="Document blob path not found")
             
         blob_path = doc["metadata"]["blob_path"]
-        
+        print(f"Blob path: {blob_path}")
         # Get file from blob storage
         file_content = await blob_store.get_file(blob_path)
         if not file_content:
@@ -335,6 +332,348 @@ async def get_completed_queries():
     """Get a list of completed queries"""
     completed_queries = await query_service.get_completed_queries()
     return completed_queries
+
+@app.get("/diagnostics/vector-search-threshold")
+async def check_vector_search_threshold(query: str = Query("", description="Optional test query to see scores")):
+    """Diagnostic endpoint to check vector similarity threshold and test its effect"""
+    try:
+        # Get current threshold from document repository
+        threshold = document_repository.similarity_threshold
+        
+        results = {
+            "current_similarity_threshold": threshold,
+            "vector_search_available": document_repository.vector_search_available,
+            "vector_index_type": document_repository.vector_index_type
+        }
+        
+        # If a query is provided, test it with the current threshold
+        if query:
+            # Get a few more results than normal for analysis
+            limit = 10
+            
+            # Generate embedding for the query
+            query_embedding = document_processor.encoder.encode(query)
+            embedding = Embedding.create(query_embedding.tolist())
+            
+            # Perform search without filtering to see raw scores
+            # This is a direct search that bypasses the threshold for diagnostic purposes
+            pipeline = []
+            
+            if document_repository.vector_index_type == 'atlas':
+                pipeline = [
+                    {
+                        "$search": {
+                            "index": document_repository.vector_index_name,
+                            "knnBeta": {
+                                "vector": embedding.vector,
+                                "path": "embedding.vector",
+                                "k": limit
+                            }
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 1,
+                            "content": 1, 
+                            "metadata": 1,
+                            "source": 1,
+                            "score": { "$meta": "searchScore" }
+                        }
+                    }
+                ]
+            elif document_repository.vector_index_type == 'native':
+                pipeline = [
+                    {
+                        "$vectorSearch": {
+                            "index": document_repository.vector_index_name,
+                            "path": "embedding.vector",
+                            "queryVector": embedding.vector,
+                            "numCandidates": limit * 10,
+                            "limit": limit
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 1,
+                            "content": 1,
+                            "metadata": 1, 
+                            "source": 1,
+                            "score": { "$meta": "vectorSearchScore" }
+                        }
+                    }
+                ]
+            
+            cursor = document_repository.chunks.aggregate(pipeline)
+            test_results = await cursor.to_list(length=limit)
+            
+            # Format the results for easy analysis
+            query_results = []
+            for doc in test_results:
+                score = doc.get("score", 0)
+                metadata = doc.get("metadata", {})
+                source = doc.get("source", "Unknown")
+                meets_threshold = score >= threshold
+                
+                query_results.append({
+                    "content_snippet": doc.get("content", "")[:100] + "...",
+                    "source": source,
+                    "score": score,
+                    "meets_threshold": meets_threshold,
+                    "metadata": metadata
+                })
+            
+            results["query"] = query
+            results["results"] = query_results
+            results["filtered_results_count"] = sum(1 for r in query_results if r["meets_threshold"])
+            
+        return results
+    except Exception as e:
+        logger.error(f"Error checking vector search threshold: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error checking vector search threshold: {str(e)}")
+
+@app.get("/vector/similarity-scores")
+async def get_similarity_scores(query: str = Query(..., description="Query to calculate similarity scores for")):
+    """
+    Get similarity scores between a query and documents in the vector store.
+    This endpoint focuses specifically on printing the vector similarity scores.
+    """
+    try:
+        logger.info(f"Calculating similarity scores for query: {query}")
+        
+        # Maximum number of results to return
+        limit = 20
+        
+        # Generate embedding for the query using document processor
+        query_embedding = document_processor.encoder.encode(query)
+        
+        # Assuming Embedding is imported from domain.value_objects.embedding
+        try:
+            from app.domain.value_objects.embedding import Embedding
+        except ImportError:
+            from domain.value_objects.embedding import Embedding
+            
+        embedding = Embedding.create(query_embedding.tolist())
+        
+        # Prepare the search pipeline based on vector index type
+        pipeline = []
+        
+        if document_repository.vector_index_type == 'atlas':
+            pipeline = [
+                {
+                    "$search": {
+                        "index": document_repository.vector_index_name,
+                        "knnBeta": {
+                            "vector": embedding.vector,
+                            "path": "embedding.vector",
+                            "k": limit
+                        }
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "content": 1, 
+                        "source": 1,
+                        "metadata": 1,
+                        "score": { "$meta": "searchScore" }
+                    }
+                }
+            ]
+        elif document_repository.vector_index_type == 'native':
+            pipeline = [
+                {
+                    "$vectorSearch": {
+                        "index": document_repository.vector_index_name,
+                        "path": "embedding.vector",
+                        "queryVector": embedding.vector,
+                        "numCandidates": limit * 10,
+                        "limit": limit
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 1,
+                        "content": 1,
+                        "source": 1,
+                        "metadata": 1,
+                        "score": { "$meta": "vectorSearchScore" }
+                    }
+                }
+            ]
+        else:
+            return {"error": "Vector search not available or properly configured"}
+        
+        # Execute the search
+        cursor = document_repository.chunks.aggregate(pipeline)
+        results = await cursor.to_list(length=limit)
+        
+        # Format results to emphasize similarity scores
+        formatted_results = []
+        for doc in results:
+            score = doc.get("score", 0)
+            source = doc.get("source", "Unknown")
+            doc_id = str(doc.get("_id", "Unknown"))
+            
+            # Get a snippet of content for context
+            content_snippet = doc.get("content", "")[:150] + "..." if len(doc.get("content", "")) > 150 else doc.get("content", "")
+            
+            formatted_results.append({
+                "score": score,
+                "document_id": doc_id,
+                "source": source,
+                "content_preview": content_snippet
+            })
+        
+        # Sort by similarity score (highest first)
+        formatted_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        return {
+            "query": query,
+            "vector_search_type": document_repository.vector_index_type,
+            "similarity_scores": formatted_results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating similarity scores: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error calculating similarity scores: {str(e)}")
+
+# Helper function to convert documents to PDF
+async def convert_to_pdf(file: UploadFile) -> Tuple[bytes, str]:
+    """
+    Converts a document to PDF format using the document-processor service
+    
+    Args:
+        file: The uploaded file to convert
+        
+    Returns:
+        Tuple containing (pdf_content_bytes, original_filename_with_pdf_extension)
+    """
+    logger.info(f"Converting document to PDF format: {file.filename}")
+    
+    # Check if the file is already a PDF (check by content type and extension)
+    is_pdf_content_type = file.content_type == "application/pdf"
+    is_pdf_extension = file.filename.lower().endswith('.pdf')
+    
+    if (is_pdf_content_type or is_pdf_extension):
+        logger.info(f"File '{file.filename}' is detected as PDF (content_type: {file.content_type}), skipping conversion")
+        content = await file.read()
+        # Reset file pointer for further use
+        await file.seek(0)
+        return content, file.filename
+    
+    # Read file content
+    content = await file.read()
+    
+    try:
+        # Improve content type detection
+        content_type = file.content_type
+        if not content_type or content_type == "application/octet-stream":
+            # Try to determine content type from file extension
+            content_type = mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+            logger.debug(f"Updated content type for {file.filename}: {content_type}")
+        
+        # Get file extension for format detection
+        file_extension = os.path.splitext(file.filename)[1].lower().lstrip('.')
+        if not file_extension:
+            file_extension = "txt"  # Default to txt if no extension is found
+        
+        logger.debug(f"File extension extracted: '{file_extension}'")
+        
+        # Create form data for the document-processor service
+        form_data = aiohttp.FormData()
+        form_data.add_field('file', 
+                          io.BytesIO(content),
+                          filename=file.filename,
+                          content_type=content_type)
+        
+        # Explicitly add format field based on file extension
+        form_data.add_field('format', file_extension)
+        
+        logger.debug(f"Sending file to conversion service: filename={file.filename}, content_type={content_type}, format={file_extension}, size={len(content)} bytes")
+        
+        # Send request to document-processor service
+        # Make sure the endpoint path is correct - make sure we're using /api/convert
+        convert_url = f"{DOCUMENT_PROCESSOR_URL}/api/convert"
+        logger.info(f"Sending document to conversion service: {convert_url}")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(convert_url, data=form_data) as response:
+                if response.status != 200:
+                    # For error responses, try to get text content
+                    try:
+                        error_text = await response.text(errors='replace')
+                        logger.error(f"Failed to convert document: {error_text}")
+                        raise HTTPException(
+                            status_code=500, 
+                            detail=f"Failed to convert document to PDF: {error_text}"
+                        )
+                    except Exception as text_err:
+                        logger.error(f"Failed to convert document and couldn't read error text: {text_err}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Failed to convert document to PDF"
+                        )
+                
+                # For successful responses, get binary content directly
+                pdf_content = await response.read()
+                logger.debug(f"Received PDF conversion response, size: {len(pdf_content)} bytes")
+        
+        # Get filename without extension and add PDF extension
+        filename_base = Path(file.filename).stem
+        pdf_filename = f"{filename_base}.pdf"
+        
+        logger.info(f"Successfully converted document to PDF: {pdf_filename}")
+        return pdf_content, pdf_filename
+        
+    except Exception as e:
+        logger.error(f"Error converting document to PDF: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error converting document to PDF: {str(e)}"
+        )
+    finally:
+        # Reset file pointer for further use
+        await file.seek(0)
+
+async def process_document_upload(file: UploadFile) -> Dict:
+    """
+    Process a single document upload, including PDF conversion and storage
+    
+    Args:
+        file: The uploaded file to process
+        
+    Returns:
+        Dict containing the document details
+    """
+    # Convert document to PDF 
+    pdf_content, pdf_filename = await convert_to_pdf(file)
+    
+    # Store the converted PDF in blob storage
+    blob_path = await blob_store.upload_binary(pdf_content, pdf_filename)
+    
+    # Create document DTO with PDF content
+    doc_dto = DocumentDTO(
+        title=pdf_filename,
+        content=pdf_content,
+        metadata={
+            'file_type': 'application/pdf',
+            'blob_path': blob_path,
+            'source_type': 'file',
+            'original_filename': file.filename,
+            'original_content_type': file.content_type
+        }
+    )
+    
+    # Process and store document
+    document_id = await document_service.process_and_store_document(doc_dto)
+    
+    return {
+        "file": pdf_filename,
+        "original_file": file.filename,
+        "document_id": document_id,
+        "blob_path": blob_path,
+        "content_type": "application/pdf"
+    }
 
 # Modified run block for direct execution
 if __name__ == "__main__":

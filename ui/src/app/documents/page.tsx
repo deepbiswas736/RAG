@@ -21,6 +21,9 @@ export default function DocumentsPage() {
       
       <div className="bg-white shadow-md rounded-lg p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4">Upload New Document</h2>
+        <p className="mb-4 text-sm text-gray-600">
+          Upload documents in any format (PDF, DOCX, TXT, etc.). All documents will be automatically converted to PDF format for consistent processing and storage.
+        </p>
         <form onSubmit={handleUpload} className="space-y-4">
           <div>
             <label htmlFor="document" className="block text-sm font-medium text-gray-700 mb-1">

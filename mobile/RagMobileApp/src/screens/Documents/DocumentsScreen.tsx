@@ -139,6 +139,9 @@ const DocumentsScreen = () => {
         <Text style={styles.subtitle}>
           Upload and manage documents for use with the RAG system
         </Text>
+        <Text style={styles.infoText}>
+          All documents will be automatically converted to PDF format for consistent processing.
+        </Text>
       </View>
 
       {/* Action Buttons */}
@@ -210,6 +213,11 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#666',
+    marginTop: 4,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#999',
     marginTop: 4,
   },
   actionButtons: {

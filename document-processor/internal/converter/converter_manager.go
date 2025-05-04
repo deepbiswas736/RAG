@@ -44,6 +44,8 @@ func CreateDefaultManager() *ConverterManager {
 	manager.RegisterConverter(NewDOCXConverter())
 	manager.RegisterConverter(NewTXTConverter())
 	manager.RegisterConverter(NewMDConverter())
+	manager.RegisterConverter(NewPNGConverter())
+	manager.RegisterConverter(NewJPEGConverter())
 	// Add more converters as they are implemented
 
 	return manager
