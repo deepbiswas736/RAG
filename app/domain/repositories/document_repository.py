@@ -13,6 +13,11 @@ class DocumentRepository(ABC):
     async def find_by_id(self, document_id: str) -> Optional[Document]:
         """Find a document by its ID"""
         pass
+        
+    @abstractmethod
+    async def find_by_checksum(self, checksum: str) -> Optional[Document]:
+        """Find a document by its content checksum"""
+        pass
 
     @abstractmethod
     async def save_chunks(self, chunks: List[Chunk]) -> List[str]:

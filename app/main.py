@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Fix imports by getting the absolute paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
+if (parent_dir not in sys.path):
     sys.path.append(parent_dir)
     logger.debug(f"Added {parent_dir} to sys.path")
 
@@ -36,10 +36,16 @@ try:
     from .application.services.document_service import DocumentService, DocumentDTO
     from .application.services.query_service import QueryService
     from .domain.services.document_processing_service import DocumentProcessingService
+    from .domain.services.query_preprocessor import QueryPreprocessor
+    from .domain.services.advanced_chunking_service import AdvancedChunkingService
+    from .domain.services.query_enhancer import QueryEnhancer
     from .infrastructure.persistence.mongodb_document_repository import MongoDBDocumentRepository
     from .infrastructure.llm.llm_manager import LLMManager
     from .infrastructure.blob.blob_store import BlobStore
     from .infrastructure.messaging.kafka_consumer import KafkaConsumerService
+    from .infrastructure.reranking.cross_encoder_reranker import CrossEncoderReRanker
+    from .infrastructure.query_enhancement.advanced_query_enhancer import AdvancedQueryEnhancer
+    from .infrastructure.query_enhancement.query_enhancer_pipeline import QueryEnhancerPipeline
     logger.debug("Imported modules using relative imports")
 except ImportError as e:
     logger.debug(f"Relative import failed: {e}, trying absolute imports")
@@ -47,10 +53,16 @@ except ImportError as e:
     from app.application.services.document_service import DocumentService, DocumentDTO
     from app.application.services.query_service import QueryService
     from app.domain.services.document_processing_service import DocumentProcessingService
+    from app.domain.services.query_preprocessor import QueryPreprocessor
+    from app.domain.services.advanced_chunking_service import AdvancedChunkingService
+    from app.domain.services.query_enhancer import QueryEnhancer
     from app.infrastructure.persistence.mongodb_document_repository import MongoDBDocumentRepository
     from app.infrastructure.llm.llm_manager import LLMManager
     from app.infrastructure.blob.blob_store import BlobStore
     from app.infrastructure.messaging.kafka_consumer import KafkaConsumerService
+    from app.infrastructure.reranking.cross_encoder_reranker import CrossEncoderReRanker
+    from app.infrastructure.query_enhancement.advanced_query_enhancer import AdvancedQueryEnhancer
+    from app.infrastructure.query_enhancement.query_enhancer_pipeline import QueryEnhancerPipeline
     logger.debug("Imported modules using absolute imports")
 
 from pydantic import BaseModel
@@ -87,8 +99,30 @@ document_processor = DocumentProcessingService()
 llm_manager = LLMManager()
 blob_store = BlobStore()
 
-# Initialize application services
-document_service = DocumentService(document_repository, document_processor)
+# Initialize precision-enhancing components
+query_preprocessor = QueryPreprocessor()
+advanced_chunking = AdvancedChunkingService() 
+cross_encoder_reranker = CrossEncoderReRanker()
+
+# Initialize query enhancer components
+advanced_query_enhancer = AdvancedQueryEnhancer(llm_manager=llm_manager)
+
+# Set up the query enhancer pipeline
+query_enhancer_pipeline = QueryEnhancerPipeline(
+    enhancers=[
+        advanced_query_enhancer
+        # Add more enhancers here if needed
+    ]
+)
+
+# Initialize application services with enhanced components
+document_service = DocumentService(
+    document_repository, 
+    document_processor,
+    query_preprocessor=query_preprocessor,
+    reranker=cross_encoder_reranker,
+    query_enhancer=query_enhancer_pipeline
+)
 query_service = QueryService(document_service, llm_manager)
 
 # Initialize Kafka consumer
@@ -598,7 +632,7 @@ async def convert_to_pdf(file: UploadFile) -> Tuple[bytes, str]:
         
         async with aiohttp.ClientSession() as session:
             async with session.post(convert_url, data=form_data) as response:
-                if response.status != 200:
+                if (response.status != 200):
                     # For error responses, try to get text content
                     try:
                         error_text = await response.text(errors='replace')
@@ -637,13 +671,14 @@ async def convert_to_pdf(file: UploadFile) -> Tuple[bytes, str]:
 
 async def process_document_upload(file: UploadFile) -> Dict:
     """
-    Process a single document upload, including PDF conversion and storage
+    Process a single document upload, including PDF conversion, checksum verification, and storage.
+    Prevents duplicate document uploads by checking content checksums.
     
     Args:
         file: The uploaded file to process
         
     Returns:
-        Dict containing the document details
+        Dict containing the document details and duplicate status
     """
     # Convert document to PDF 
     pdf_content, pdf_filename = await convert_to_pdf(file)
@@ -664,13 +699,31 @@ async def process_document_upload(file: UploadFile) -> Dict:
         }
     )
     
-    # Process and store document
-    document_id = await document_service.process_and_store_document(doc_dto)
+    # Process and store document with checksum verification
+    result = await document_service.process_and_store_document_with_checksum(doc_dto)
     
+    # Handle duplicate case
+    if result['is_duplicate']:
+        logger.info(f"Document '{pdf_filename}' is a duplicate with checksum: {result['checksum']}")
+        return {
+            "file": pdf_filename,
+            "original_file": file.filename,
+            "document_id": result['document_id'],
+            "is_duplicate": True,
+            "checksum": result['checksum'],
+            "blob_path": blob_path,
+            "content_type": "application/pdf",
+            "message": "Document already exists in the database, skipped processing."
+        }
+    
+    # Handle new document case
+    logger.info(f"Added new document '{pdf_filename}' with checksum: {result['checksum']}")
     return {
         "file": pdf_filename,
         "original_file": file.filename,
-        "document_id": document_id,
+        "document_id": result['document_id'],
+        "is_duplicate": False,
+        "checksum": result['checksum'],
         "blob_path": blob_path,
         "content_type": "application/pdf"
     }

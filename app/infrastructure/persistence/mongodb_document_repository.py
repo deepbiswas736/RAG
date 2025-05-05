@@ -80,6 +80,10 @@ class MongoDBDocumentRepository(DocumentRepository):
             await self.documents.create_index([("document_id", 1)], unique=True, sparse=True)
             await self.chunks.create_index([("metadata.document_id", 1)], sparse=True)
             await self.chunks.create_index([("chunk_id", 1)], unique=True, sparse=True)
+            
+            # Create index for document checksums to optimize duplicate detection
+            await self.documents.create_index([("metadata.checksum", 1)], sparse=True)
+            
             await self._ensure_vector_index() # Ensure vector index after basic indexes
             logger.info("Successfully ensured standard indexes.")
         except OperationFailure as e:
@@ -448,3 +452,34 @@ class MongoDBDocumentRepository(DocumentRepository):
                 "error": str(e),
                 "vector_search_available": self.vector_search_available
             }
+
+    async def find_by_checksum(self, checksum: str) -> Optional[Document]:
+        """Find a document by its content checksum"""
+        if not checksum or self.documents is None:
+            return None
+        
+        try:
+            # Search for documents with matching checksum in metadata
+            doc = await self.documents.find_one({"metadata.checksum": checksum})
+            
+            if not doc:
+                logger.debug(f"No document found with checksum: {checksum}")
+                return None
+            
+            # Fetch the chunks for this document
+            document_id = str(doc["_id"])
+            chunks = await self.find_chunks_by_document_id(document_id)
+            
+            # Create and return the document entity
+            return Document(
+                id=document_id,
+                title=doc["title"],
+                content=doc.get("content", ""),  # Content might be large, may be missing
+                chunks=chunks,
+                metadata=DocumentMetadata.from_dict(doc["metadata"]),
+                created_at=doc.get("created_at", datetime.now()),
+                updated_at=doc.get("updated_at", datetime.now())
+            )
+        except Exception as e:
+            logger.error(f"Error finding document by checksum: {e}")
+            return None

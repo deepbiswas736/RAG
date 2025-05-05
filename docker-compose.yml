@@ -25,16 +25,16 @@ services:
       retries: 3
 
   mongodb:
-    image: mongodb/mongodb-atlas-local:latest # Revert to standard mongo image
+    image: mongodb/mongodb-atlas-local:latest  # Reverting back to atlas-local image
     ports:
       - "27017:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=user
       - MONGO_INITDB_ROOT_PASSWORD=password
     volumes:
-      - mongo_app_data:/data/db # Changed volume name here
-      - mongodb_config:/data/configdb # Added mapping for config volume
-      - ./mongo-init:/docker-entrypoint-initdb.d # Add this mount for init scripts
+      - mongo_app_data:/data/db 
+      - mongodb_config:/data/configdb
+      - ./mongo-init:/docker-entrypoint-initdb.d
     restart: always
     healthcheck:
       # Updated healthcheck to include authentication
@@ -59,8 +59,9 @@ services:
               capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - OLLAMA_NUM_GPU=32  # Optimized for 6GB VRAM - RTX 3050
+      - OLLAMA_NUM_GPU=1  # Changed from 32 to 1 - more stable setting for consumer GPUs
       - CUDA_VISIBLE_DEVICES=0
+      - OLLAMA_GPU_LAYERS=33  # Add this to explicitly set all layers to GPU
 
   minio:
     image: minio/minio
