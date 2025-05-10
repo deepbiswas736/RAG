@@ -28,7 +28,6 @@ class Document:
         return cls(
             id="",  # Will be set by repository
             title=title,
-            content=content,
             chunks=[],
             metadata=DocumentMetadata.from_dict(metadata),
             created_at=now,

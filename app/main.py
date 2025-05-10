@@ -43,9 +43,11 @@ try:
     from .infrastructure.llm.llm_manager import LLMManager
     from .infrastructure.blob.blob_store import BlobStore
     from .infrastructure.messaging.kafka_consumer import KafkaConsumerService
+    from .infrastructure.messaging.metadata_consumer import MetadataConsumerService
     from .infrastructure.reranking.cross_encoder_reranker import CrossEncoderReRanker
     from .infrastructure.query_enhancement.advanced_query_enhancer import AdvancedQueryEnhancer
     from .infrastructure.query_enhancement.query_enhancer_pipeline import QueryEnhancerPipeline
+    from .domain.value_objects.embedding import Embedding # Added import
     logger.debug("Imported modules using relative imports")
 except ImportError as e:
     logger.debug(f"Relative import failed: {e}, trying absolute imports")
@@ -60,9 +62,11 @@ except ImportError as e:
     from app.infrastructure.llm.llm_manager import LLMManager
     from app.infrastructure.blob.blob_store import BlobStore
     from app.infrastructure.messaging.kafka_consumer import KafkaConsumerService
+    from app.infrastructure.messaging.metadata_consumer import MetadataConsumerService
     from app.infrastructure.reranking.cross_encoder_reranker import CrossEncoderReRanker
     from app.infrastructure.query_enhancement.advanced_query_enhancer import AdvancedQueryEnhancer
     from app.infrastructure.query_enhancement.query_enhancer_pipeline import QueryEnhancerPipeline
+    from app.domain.value_objects.embedding import Embedding # Added import
     logger.debug("Imported modules using absolute imports")
 
 from pydantic import BaseModel
@@ -119,14 +123,21 @@ query_enhancer_pipeline = QueryEnhancerPipeline(
 document_service = DocumentService(
     document_repository, 
     document_processor,
+    llm_manager=llm_manager,  # Pass LLM manager for metadata enrichment
     query_preprocessor=query_preprocessor,
     reranker=cross_encoder_reranker,
-    query_enhancer=query_enhancer_pipeline
+    query_enhancer=query_enhancer_pipeline,
+    kafka_bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 )
 query_service = QueryService(document_service, llm_manager)
 
-# Initialize Kafka consumer
+# Initialize Kafka consumers
 kafka_consumer = KafkaConsumerService(query_service)
+metadata_consumer = MetadataConsumerService(
+    document_repository=document_repository,
+    llm_manager=llm_manager,
+    kafka_bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+)
 
 # Add a root endpoint for API health check
 @app.get("/")
@@ -166,7 +177,7 @@ async def service_info(request: Request):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize repository and start Kafka consumer when application starts"""
+    """Initialize repository and start Kafka consumers when application starts"""
     logger.info("Starting application services...")
     
     # Initialize MongoDB repository with proper async initialization
@@ -178,16 +189,24 @@ async def startup_event():
         await llm_manager.check_availability()
         logger.info("LLM service availability checked")
         
-        # Start Kafka consumer - this will throw an exception if Kafka is not available
-        logger.info("Starting Kafka consumer...")
+        # Start Kafka query consumer - this will throw an exception if Kafka is not available
+        logger.info("Starting Kafka query consumer...")
         # Create a task but also await its initial setup to catch immediate errors
         consumer_task = asyncio.create_task(kafka_consumer.start_consuming())
-        # Give it a short time to initialize and potentially throw errors
+        
+        # Start Kafka metadata enrichment consumer
+        logger.info("Starting metadata enrichment consumer...")
+        metadata_consumer_task = asyncio.create_task(metadata_consumer.start())
+        
+        # Give them a short time to initialize and potentially throw errors
         await asyncio.sleep(1)  
         
-        # Quick check to see if the task failed immediately
+        # Quick check to see if the tasks failed immediately
         if consumer_task.done() and consumer_task.exception() is not None:
-            raise RuntimeError(f"Kafka consumer failed to start: {consumer_task.exception()}")
+            raise RuntimeError(f"Kafka query consumer failed to start: {consumer_task.exception()}")
+            
+        if metadata_consumer_task.done() and metadata_consumer_task.exception() is not None:
+            raise RuntimeError(f"Metadata consumer failed to start: {metadata_consumer_task.exception()}")
             
         logger.info("Application startup completed successfully")
     except Exception as e:
@@ -197,8 +216,44 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop Kafka consumer when application shuts down"""
-    await kafka_consumer.stop()
+    """Stop Kafka consumers when application shuts down"""
+    logger.info("Application is shutting down, stopping services...")
+    
+    # Create a list of shutdown tasks
+    shutdown_tasks = []
+    
+    # Add Kafka consumer shutdown tasks with timeouts
+    if hasattr(kafka_consumer, 'stop'):
+        logger.info("Stopping Kafka query consumer...")
+        shutdown_tasks.append(kafka_consumer.stop())
+    
+    if hasattr(metadata_consumer, 'stop'):
+        logger.info("Stopping metadata consumer...")
+        shutdown_tasks.append(metadata_consumer.stop())
+    
+    # Wait for all shutdown tasks to complete with a timeout
+    if shutdown_tasks:
+        try:
+            # Use asyncio.wait with a timeout to ensure we don't hang indefinitely
+            done, pending = await asyncio.wait(
+                shutdown_tasks,
+                timeout=5.0,  # 5 seconds max wait time
+                return_when=asyncio.ALL_COMPLETED
+            )
+            
+            # Log any pending tasks that didn't complete in time
+            if pending:
+                logger.warning(f"{len(pending)} shutdown tasks didn't complete in time")
+            
+            logger.info("All Kafka consumers stopped during shutdown")
+        except Exception as e:
+            logger.error(f"Error during application shutdown: {e}")
+    else:
+        logger.info("No services to stop during shutdown")
+    
+    # Add a small delay to allow final cleanup
+    await asyncio.sleep(0.5)
+    logger.info("Application shutdown complete")
 
 @app.post("/documents/upload")
 async def upload_documents(files: List[UploadFile]):

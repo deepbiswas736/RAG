@@ -12,13 +12,13 @@ export async function POST(req: NextRequest) {
     }
     
     console.log(`File received: ${file.name}, size: ${file.size} bytes`);
-    
-    // Forward to FastAPI backend
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000/document/upload';
-    console.log(`Uploading file to backend: ${backendUrl}`);
+      // Forward to Document Service
+    const documentServiceUrl = process.env.NEXT_PUBLIC_DOCUMENT_SERVICE_URL || '/api/documents';
+    const uploadUrl = `${documentServiceUrl}`;
+    console.log(`Uploading file to document service: ${uploadUrl}`);
     
     try {
-      const uploadRes = await fetch(backendUrl, {
+      const uploadRes = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
       });

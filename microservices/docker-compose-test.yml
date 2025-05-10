@@ -1,0 +1,21 @@
+version: '3.8'
+
+# Docker compose for testing metadata extraction with a simple client
+services:
+  # Test client service
+  metadata-test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-client
+    ports:
+      - "8089:8000"
+    environment:
+      - DOCUMENT_SERVICE_URL=http://document-service:8000
+      - LLM_SERVICE_URL=http://llm-service:8000
+      - TEST_DOCUMENT_PATH=/test_data
+    volumes:
+      - ./test_data:/test_data
+    depends_on:
+      - document-service
+      - llm-service
+    command: ["python", "-m", "uvicorn", "test_client:app", "--host", "0.0.0.0", "--port", "8000"]

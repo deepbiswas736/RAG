@@ -5,7 +5,8 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   const documentId = params.id;
-  const backendUrl = process.env.BACKEND_URL || `http://localhost:8000/documents/${documentId}`;
+  const documentServiceUrl = process.env.NEXT_PUBLIC_DOCUMENT_SERVICE_URL || '/api/documents';
+  const backendUrl = `${documentServiceUrl}/${documentId}`;
 
   try {
     const res = await fetch(backendUrl, {

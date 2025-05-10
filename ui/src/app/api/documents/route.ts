@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET() {
   console.log('API route /api/documents called');
   try {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000/documents/list';
+    const documentServiceUrl = process.env.NEXT_PUBLIC_DOCUMENT_SERVICE_URL || '/api/documents';
+    const backendUrl = `${documentServiceUrl}/list`;
     console.log(`Fetching documents from backend: ${backendUrl}`);
     
     try {

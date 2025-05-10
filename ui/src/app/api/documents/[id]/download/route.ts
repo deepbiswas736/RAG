@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const documentId = params.id;
-  const backendUrl = process.env.BACKEND_URL || `http://localhost:8000/documents/${documentId}/download`;
+  const documentServiceUrl = process.env.NEXT_PUBLIC_DOCUMENT_SERVICE_URL || '/api/documents';
+  const backendUrl = `${documentServiceUrl}/${documentId}/download`;
 
   try {
     console.log('Fetching document from backend:', backendUrl);

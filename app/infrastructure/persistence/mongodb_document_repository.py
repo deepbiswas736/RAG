@@ -251,7 +251,7 @@ class MongoDBDocumentRepository(DocumentRepository):
             # Handle potential bulk write errors if needed
             return []
 
-    async def search_similar(self, embedding: Embedding, limit: int = None) -> List[Chunk]:
+    async def search_similar(self, embedding: Embedding, limit: int = None, metadata_filters: Optional[Dict] = None) -> List[Chunk]:
         # Use top_k_results as the default limit if none is provided
         if limit is None:
             limit = self.top_k_results
@@ -263,10 +263,10 @@ class MongoDBDocumentRepository(DocumentRepository):
             return [] 
             
         logger.info(f"Performing vector search to find top {limit} most similar documents")
-        chunks = await self._search_vector(embedding, limit)
+        chunks = await self._search_vector(embedding, limit, metadata_filters)
         return chunks
 
-    async def _search_vector(self, embedding: Embedding, limit: int) -> List[Chunk]:
+    async def _search_vector(self, embedding: Embedding, limit: int, metadata_filters: Optional[Dict] = None) -> List[Chunk]:
         """Search using appropriate vector search method based on index type"""
         if not self.vector_search_available or self.vector_index_type is None:
              logger.warning(f"Attempted vector search, but it's unavailable or index type unknown (type: {self.vector_index_type}).")
@@ -274,63 +274,85 @@ class MongoDBDocumentRepository(DocumentRepository):
 
         pipeline = []
         try:
+            # Build the vector search stage
             if self.vector_index_type == 'atlas':
                 logger.info(f"Performing vector search using Atlas Search ($search) index '{self.vector_index_name}'.")
-                pipeline = [
-                    {
-                        "$search": {
-                            "index": self.vector_index_name,
-                            "knnBeta": {
-                                "vector": embedding.vector,
-                                "path": "embedding.vector",
-                                "k": limit
-                            }
+                search_stage = {
+                    "$search": {
+                        "index": self.vector_index_name,
+                        "knnBeta": {
+                            "vector": embedding.vector,
+                            "path": "embedding.vector",
+                            "k": limit * 3  # Fetch more results to apply filtering
                         }
-                    },
-                    {
-                        "$project": {
-                            "_id": 1,
-                            "chunk_id": 1,
-                            "content": 1,
-                            "metadata": 1,
-                            "source": 1,
-                            "embedding": 1,
-                            "score": { "$meta": "searchScore" }
-                        }
-                    },
-                    { "$limit": limit }
-                ]
+                    }
+                }
+                pipeline.append(search_stage)
+                
+                # Project required fields
+                pipeline.append({
+                    "$project": {
+                        "_id": 1,
+                        "chunk_id": 1,
+                        "content": 1,
+                        "metadata": 1,
+                        "source": 1,
+                        "embedding": 1,
+                        "score": { "$meta": "searchScore" }
+                    }
+                })
+                
             elif self.vector_index_type == 'native':
                 logger.info(f"Performing vector search using native ($vectorSearch) index '{self.vector_index_name}'.")
-                pipeline = [
-                    {
-                        "$vectorSearch": {
-                            "index": self.vector_index_name,
-                            "path": "embedding.vector",
-                            "queryVector": embedding.vector,
-                            "numCandidates": limit * 10,
-                            "limit": limit
-                        }
-                    },
-                    {
-                        "$project": {
-                            "_id": 1,
-                            "chunk_id": 1,
-                            "content": 1,
-                            "metadata": 1,
-                            "source": 1,
-                            "embedding": 1,
-                            "score": { "$meta": "vectorSearchScore" }
-                        }
-                    },
-                    { "$limit": limit }
-                ]
+                search_stage = {
+                    "$vectorSearch": {
+                        "index": self.vector_index_name,
+                        "path": "embedding.vector",
+                        "queryVector": embedding.vector,
+                        "numCandidates": limit * 20,  # Fetch more candidates to allow for filtering
+                        "limit": limit * 3  # Fetch more results to apply filtering
+                    }
+                }
+                pipeline.append(search_stage)
+                
+                # Project required fields
+                pipeline.append({
+                    "$project": {
+                        "_id": 1,
+                        "chunk_id": 1,
+                        "content": 1,
+                        "metadata": 1,
+                        "source": 1,
+                        "embedding": 1,
+                        "score": { "$meta": "vectorSearchScore" }
+                    }
+                })
+                
             else:
                 logger.error(f"Unknown vector index type '{self.vector_index_type}'. Cannot perform search.")
                 return []
+                
+            # Apply metadata filters if provided
+            if metadata_filters and isinstance(metadata_filters, dict):
+                logger.info(f"Applying metadata filters: {metadata_filters}")
+                filter_conditions = {}
+                
+                for key, value in metadata_filters.items():
+                    # Handle nested metadata fields with dot notation
+                    metadata_key = f"metadata.{key}"
+                    filter_conditions[metadata_key] = value
+                
+                if filter_conditions:
+                    match_stage = {"$match": filter_conditions}
+                    pipeline.append(match_stage)
+                    logger.info(f"Added metadata filter stage to pipeline: {match_stage}")
+            
+            # Apply final limit
+            pipeline.append({"$limit": limit})
 
-            logger.info(f"Executing vector search pipeline with index '{self.vector_index_name}' for {len(embedding.vector)} dimensions without similarity threshold filtering.")
-            cursor = self.chunks.aggregate(pipeline, maxTimeMS=15000) # Increased timeout slightly
+            # Execute the aggregation pipeline
+            logger.info(f"Executing vector search pipeline with index '{self.vector_index_name}' for {len(embedding.vector)} dimensions")
+            cursor = self.chunks.aggregate(pipeline, maxTimeMS=15000)
             results = await cursor.to_list(length=limit)
 
             chunks_found = []
@@ -359,9 +381,12 @@ class MongoDBDocumentRepository(DocumentRepository):
                      logger.warning(f"Document {doc.get('_id')} missing valid embedding data.")
             
             if chunks_found:
-                logger.info(f"Vector search found {len(chunks_found)} results from top {limit} most similar documents.")
+                logger.info(f"Vector search found {len(chunks_found)} results after applying filters (if any).")
             else:
-                logger.warning(f"Vector search returned no results. Check your vector search configuration.")
+                if metadata_filters:
+                    logger.warning(f"Vector search returned no results after applying metadata filters: {metadata_filters}")
+                else:
+                    logger.warning(f"Vector search returned no results. Check your vector search configuration.")
                 
             return chunks_found
 
@@ -373,33 +398,77 @@ class MongoDBDocumentRepository(DocumentRepository):
             return []
 
     async def find_by_id(self, document_id: str) -> Optional[Document]:
-        doc = await self.documents.find_one({"_id": document_id})
-        if not doc:
-            return None
+        """
+        Find a document by its document_id field.
         
-        chunks = await self.find_chunks_by_document_id(document_id)
-        return Document(
-            id=str(doc["_id"]),
-            title=doc["title"],
-            content=doc["content"],
-            chunks=chunks,
-            metadata=DocumentMetadata.from_dict(doc["metadata"]),
-            created_at=doc["created_at"],
-            updated_at=doc["updated_at"]
-        )
+        This method looks for a document with the given document_id in the 'document_id' field,
+        not the MongoDB '_id' field, to ensure consistency with how documents are saved.
+        
+        Args:
+            document_id: The document ID to search for
+            
+        Returns:
+            Document object if found, None otherwise
+        """
+        try:
+            # Search for document by document_id field, not _id
+            doc = await self.documents.find_one({"document_id": document_id})
+            
+            if not doc:
+                logger.warning(f"No document found with document_id: {document_id}")
+                return None
+            
+            chunks = await self.find_chunks_by_document_id(document_id)
+            
+            return Document(
+                id=document_id,  # Use document_id for consistency
+                title=doc["title"],
+                content=doc["content"],
+                chunks=chunks,
+                metadata=DocumentMetadata.from_dict(doc["metadata"]),
+                created_at=doc.get("created_at", datetime.now()),
+                updated_at=doc.get("updated_at", datetime.now())
+            )
+        except Exception as e:
+            logger.error(f"Error finding document by ID {document_id}: {e}")
+            return None
 
     async def find_chunks_by_document_id(self, document_id: str) -> List[Chunk]:
-        cursor = self.chunks.find({"metadata.document_id": document_id})
-        chunks = []
-        async for doc in cursor:
-            chunks.append(Chunk(
-                id=str(doc["_id"]),
-                content=doc["content"],
-                embedding=Embedding.create(doc["embedding"]["vector"]),
-                metadata=DocumentMetadata.from_dict(doc["metadata"]),
-                source=doc["source"]
-            ))
-        return chunks
+        """
+        Find all chunks belonging to a document based on the document_id.
+        
+        Args:
+            document_id: The document ID to search for in chunk metadata
+            
+        Returns:
+            List of chunks associated with the document
+        """
+        try:
+            cursor = self.chunks.find({"metadata.document_id": document_id})
+            chunks = []
+            async for doc in cursor:
+                # Extract embedding data
+                doc_embedding_data = doc.get("embedding")
+                if doc_embedding_data and "vector" in doc_embedding_data:
+                    try:
+                        chunk_embedding = Embedding.create(doc_embedding_data["vector"])
+                        chunks.append(Chunk(
+                            id=str(doc.get("chunk_id", doc.get("_id"))),
+                            content=doc.get("content", ""),
+                            embedding=chunk_embedding,
+                            metadata=DocumentMetadata.from_dict(doc.get("metadata", {})),
+                            source=doc.get("source", "")
+                        ))
+                    except Exception as e:
+                        logger.error(f"Error creating chunk from document {doc.get('_id')}: {e}")
+                else:
+                    logger.warning(f"Chunk {doc.get('_id')} missing valid embedding data")
+                    
+            logger.info(f"Found {len(chunks)} chunks for document {document_id}")
+            return chunks
+        except Exception as e:
+            logger.error(f"Error finding chunks for document {document_id}: {e}")
+            return []
 
     async def check_vector_index_status(self):
         """Diagnostic function to check vector index status"""
@@ -483,3 +552,258 @@ class MongoDBDocumentRepository(DocumentRepository):
         except Exception as e:
             logger.error(f"Error finding document by checksum: {e}")
             return None
+
+    async def update_metadata(self, document_id: str, metadata: DocumentMetadata) -> bool:
+        """Update metadata for a document."""
+        try:
+            # Convert metadata to dict for MongoDB update
+            metadata_dict = metadata.__dict__
+            
+            # Update the document's metadata
+            result = await self.documents.update_one(
+                {"document_id": document_id},
+                {"$set": {"metadata": metadata_dict}}
+            )
+            
+            # Also update metadata in all associated chunks
+            chunk_update = await self.chunks.update_many(
+                {"metadata.document_id": document_id},
+                {"$set": {"metadata": metadata_dict}}
+            )
+            
+            logger.info(f"Updated metadata for document {document_id}: {result.modified_count} document and {chunk_update.modified_count} chunks modified")
+            
+            # Return True if the document was found and updated
+            return result.matched_count > 0 and result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Error updating metadata for document {document_id}: {e}")
+            return False
+
+    async def filter_then_search(self, 
+                                embedding: Embedding, 
+                                metadata_filters: Dict,
+                                limit: int = 5,
+                                pre_filter_limit: int = 100) -> List[Chunk]:
+        """
+        Two-step retrieval: First filter by metadata, then find semantically similar chunks.
+        
+        Args:
+            embedding: The query embedding to compare against
+            metadata_filters: Dictionary of metadata key-value pairs for filtering
+            limit: Maximum number of final results to return
+            pre_filter_limit: Maximum number of chunks to retrieve in the initial metadata filtering
+            
+        Returns:
+            List of chunks matching both metadata filters and semantic similarity
+        """
+        if not self.vector_search_available:
+            logger.error("Vector search is not available. Cannot perform search.")
+            return []
+            
+        logger.info(f"Performing two-step retrieval with metadata filters: {metadata_filters}")
+        
+        try:
+            # STEP 1: Filter chunks by metadata first
+            if not metadata_filters:
+                logger.warning("No metadata filters provided for filter_then_search. Falling back to standard search.")
+                return await self.search_similar(embedding, limit)
+                
+            filter_conditions = {}
+            for key, value in metadata_filters.items():
+                # Handle different types of filters: exact match, array contains, etc.
+                metadata_key = f"metadata.{key}"
+                
+                if isinstance(value, str):
+                    # For string values, use case-insensitive matching
+                    filter_conditions[metadata_key] = {"$regex": f"^{value}$", "$options": "i"}
+                elif isinstance(value, list):
+                    # For lists, check if metadata field contains any of the values
+                    if all(isinstance(item, str) for item in value):
+                        # For string lists, use case-insensitive matching on any item
+                        filter_conditions[metadata_key] = {"$in": value}
+                    else:
+                        filter_conditions[metadata_key] = {"$in": value}
+                else:
+                    # For other types (numbers, booleans), use exact matching
+                    filter_conditions[metadata_key] = value
+            
+            logger.info(f"Filtering chunks by metadata: {filter_conditions}")
+            
+            # Find chunks matching metadata filters
+            filtered_chunks_cursor = self.chunks.find(filter_conditions).limit(pre_filter_limit)
+            filtered_chunks = await filtered_chunks_cursor.to_list(length=pre_filter_limit)
+            
+            if not filtered_chunks:
+                logger.info("No chunks found matching metadata filters")
+                return []
+                
+            logger.info(f"Found {len(filtered_chunks)} chunks matching metadata filters")
+            
+            # STEP 2: Compute similarity scores for the filtered chunks
+            # This is the most efficient approach as we're only computing similarity
+            # for chunks that already match our metadata criteria
+            
+            chunk_objects = []
+            for doc in filtered_chunks:
+                try:
+                    # Extract embedding data
+                    doc_embedding_data = doc.get("embedding")
+                    if doc_embedding_data and "vector" in doc_embedding_data:
+                        doc_embedding = Embedding.create(doc_embedding_data["vector"])
+                        
+                        # Compute similarity score 
+                        # Use dot product for cosine similarity since vectors are normalized
+                        similarity_score = sum(a * b for a, b in zip(embedding.vector, doc_embedding.vector))
+                        
+                        # Create chunk with metadata
+                        chunk = Chunk(
+                            id=str(doc["_id"]),
+                            content=doc.get("content", ""),
+                            embedding=doc_embedding,
+                            metadata=DocumentMetadata.from_dict(doc.get("metadata", {})),
+                            source=doc.get("source", "")
+                        )
+                        
+                        # Store chunk with its similarity score
+                        chunk_objects.append((chunk, similarity_score))
+                except Exception as e:
+                    logger.error(f"Error processing chunk {doc.get('_id')}: {e}")
+            
+            # Sort by similarity score (highest first) and take top 'limit' results
+            chunk_objects.sort(key=lambda x: x[1], reverse=True)
+            top_chunks = [chunk for chunk, _ in chunk_objects[:limit]]
+            
+            logger.info(f"Returning top {len(top_chunks)} chunks based on semantic similarity")
+            return top_chunks
+            
+        except Exception as e:
+            logger.error(f"Error in filter_then_search: {e}")
+            return []
+
+    async def semantic_metadata_search(self, query: str, embedding: Embedding, limit: int = 100) -> List[str]:
+        """
+        Perform semantic search on metadata fields to find relevant document IDs.
+        
+        This method searches through document metadata fields like topics, keywords, and summary,
+        using both text matching and vector similarity to find relevant documents.
+        """
+        if not self.vector_search_available:
+            logger.error("Vector search is not available. Cannot perform search.")
+            return []
+            
+        try:
+            # Create a pipeline that will:
+            # 1. Search for metadata fields that contain the query terms
+            # 2. Perform vector similarity search on concatenated metadata text
+            # 3. Return document IDs sorted by relevance score
+            
+            # First, get documents by metadata text search
+            metadata_pipeline = []
+            
+            if self.vector_index_type == 'atlas':
+                # Create a compound query that looks at various metadata fields
+                metadata_pipeline = [
+                    {
+                        "$search": {
+                            "index": self.vector_index_name,
+                            "compound": {
+                                "should": [
+                                    # Search in topics
+                                    {
+                                        "text": {
+                                            "query": query,
+                                            "path": "metadata.topics",
+                                            "score": { "boost": { "value": 3 } }  # Higher weight for topics
+                                        }
+                                    },
+                                    # Search in keywords
+                                    {
+                                        "text": {
+                                            "query": query,
+                                            "path": "metadata.keywords",
+                                            "score": { "boost": { "value": 2.5 } }  # High weight for keywords
+                                        }
+                                    },
+                                    # Search in summary
+                                    {
+                                        "text": {
+                                            "query": query,
+                                            "path": "metadata.summary",
+                                            "score": { "boost": { "value": 2 } }  # Medium weight for summary
+                                        }
+                                    },
+                                    # Search in person_name
+                                    {
+                                        "text": {
+                                            "query": query,
+                                            "path": "metadata.person_name",
+                                            "score": { "boost": { "value": 4 } }  # Highest weight for person name
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    # Get scores and project needed fields
+                    {
+                        "$project": {
+                            "_id": 1,
+                            "document_id": 1,
+                            "metadata": 1,
+                            "score": { "$meta": "searchScore" }
+                        }
+                    },
+                    # Group by document_id to avoid duplicates
+                    {
+                        "$group": {
+                            "_id": "$metadata.document_id",
+                            "score": { "$max": "$score" },
+                            "document_id": { "$first": "$metadata.document_id" }
+                        }
+                    },
+                    # Sort by score
+                    { "$sort": { "score": -1 } },
+                    # Limit results
+                    { "$limit": limit }
+                ]
+            else:
+                # For non-Atlas search, use a simpler approach with $text index if available
+                # Otherwise, just use metadata.document_id as a fallback
+                logger.warning("Atlas search not available for semantic metadata search, using fallback approach")
+                metadata_pipeline = [
+                    {
+                        "$match": {
+                            "$or": [
+                                {"metadata.topics": {"$regex": query, "$options": "i"}},
+                                {"metadata.keywords": {"$regex": query, "$options": "i"}},
+                                {"metadata.person_name": {"$regex": query, "$options": "i"}},
+                                {"metadata.summary": {"$regex": query, "$options": "i"}}
+                            ]
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": "$metadata.document_id",
+                            "document_id": { "$first": "$metadata.document_id" }
+                        }
+                    },
+                    { "$limit": limit }
+                ]
+            
+            # Execute the pipeline
+            cursor = self.chunks.aggregate(metadata_pipeline)
+            results = await cursor.to_list(length=limit)
+            
+            # Extract document IDs
+            document_ids = []
+            if results:
+                document_ids = [r.get("document_id") for r in results if r.get("document_id")]
+                logger.info(f"Semantic metadata search found {len(document_ids)} relevant documents")
+            else:
+                logger.info("No documents found by semantic metadata search")
+            
+            return document_ids
+            
+        except Exception as e:
+            logger.error(f"Error in semantic metadata search: {e}", exc_info=True)
+            return []

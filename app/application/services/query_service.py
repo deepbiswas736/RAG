@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, Optional, AsyncGenerator, Tuple
 from dataclasses import dataclass
 import uuid
 import asyncio
@@ -9,6 +9,7 @@ import os
 import logging
 
 from ...domain.services.document_processing_service import DocumentProcessingService
+from ...domain.services.query_metadata_extractor import QueryMetadataExtractor, QueryMetadata
 from ..services.document_service import DocumentService, ChunkDTO
 from ...infrastructure.llm.llm_manager import LLMManager
 
@@ -18,9 +19,10 @@ logger = logging.getLogger(__name__)
 class QueryResult:
     query_id: str
     answer: str
-    source_chunks: List[ChunkDTO]
+    source_chunks: List[ChunkDTO]  # Corrected syntax: List[ChunkDTO]
     status: str
-    chunk_responses: Optional[List[str]] = None  # Add field to store per-chunk responses
+    chunk_responses: Optional[List[str]] = None
+    query_metadata: Optional[QueryMetadata] = None
 
 class QueryService:
     def __init__(
@@ -33,6 +35,10 @@ class QueryService:
         self.llm_manager = llm_manager
         self._setup_kafka(kafka_bootstrap_servers)
         self.query_results: Dict[str, Optional[QueryResult]] = {}
+        
+        # Initialize the query metadata extractor
+        self.metadata_extractor = QueryMetadataExtractor(llm_manager=self.llm_manager)
+        logger.info("Initialized query metadata extractor")
 
     def _setup_kafka(self, bootstrap_servers: str = None):
         try:
@@ -86,9 +92,41 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
         summary_response = await self.llm_manager.generate_summary(summary_prompt)
         return summary_response
 
+    def _extract_query_metadata(self, query: str) -> QueryMetadata:
+        """
+        Extract structured metadata from the query synchronously using LLM to ensure high precision.
+        
+        Args:
+            query: The user's query
+            
+        Returns:
+            QueryMetadata object containing structured metadata
+        """
+        try:
+            logger.info(f"Extracting metadata from query with LLM synchronously: {query}")
+            # Use LLM-based extraction synchronously for high precision
+            return self.metadata_extractor.extract_metadata_with_llm_sync(query)
+        except Exception as e:
+            logger.error(f"Error extracting query metadata: {e}")
+            # Return basic metadata on error
+            return self.metadata_extractor.extract_metadata(query)
+
     async def query_sync(self, query: str) -> AsyncGenerator[str, None]:
         """Execute a synchronous query with streaming response using the two-step process"""
-        chunks = await self.document_service.search_similar_chunks(query)
+        # Extract metadata from the query to understand intent and context
+        query_metadata = self._extract_query_metadata(query)
+        
+        # Use the processed query if available, otherwise use original
+        query_to_use = query_metadata.processed_query or query
+        logger.info(f"Using processed query: '{query_to_use}' (original: '{query}')")
+        
+        # Convert extracted metadata to filters if applicable
+        metadata_filters = self._create_metadata_filters(query_metadata)
+        
+        # Use the new two-step semantic search approach for better results
+        # First search metadata semantically, then search content within relevant documents
+        chunks = await self.document_service.semantic_metadata_then_content_search(query_to_use)
+        
         if not chunks:
             yield "I couldn't find any relevant information to answer your query."
             return
@@ -108,7 +146,7 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
         # Step 1: Process each chunk individually
         chunk_responses = []
         for i, context in enumerate(contexts):
-            chunk_response = await self._process_chunk_with_llm(query, context)
+            chunk_response = await self._process_chunk_with_llm(query_to_use, context)
             chunk_responses.append(chunk_response)
             # Don't yield individual chunk responses in streaming mode
 
@@ -124,12 +162,17 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
         
         sources_text = "\n".join([f"- {source}" for source in set(sources)])
         
-        summary_prompt = f"""I've analyzed the query: "{query}" against multiple text chunks and received these responses:
+        # Include relevant query metadata in the summary prompt
+        metadata_hints = self._get_metadata_hints(query_metadata)
+        
+        summary_prompt = f"""I've analyzed the query: "{query_to_use}" against multiple text chunks and received these responses:
 
 {summary_context}
 
 The information comes from these sources:
 {sources_text}
+
+{metadata_hints}
 
 Please synthesize a comprehensive, coherent answer based on all these responses. Combine the information logically, 
 avoid redundancy, and ensure all key points are covered. Include specific references to sources where appropriate.
@@ -138,6 +181,77 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
         # Stream the summary response
         async for token in self.llm_manager.generate_streaming_response(summary_prompt, []):
             yield token
+            
+    def _get_metadata_hints(self, metadata: QueryMetadata) -> str:
+        """
+        Generate hints from metadata to include in LLM prompt.
+        
+        Args:
+            metadata: QueryMetadata object
+            
+        Returns:
+            String with hints based on metadata
+        """
+        hints = []
+        
+        # Add person focus if present
+        if metadata.entities["person"]:
+            persons = ", ".join(metadata.entities["person"])
+            hints.append(f"This query is about the person(s): {persons}.")
+        
+        # Add organization focus if present
+        if metadata.entities["organization"]:
+            orgs = ", ".join(metadata.entities["organization"])
+            hints.append(f"The query relates to organization(s): {orgs}.")
+        
+        # Add time context if present
+        if metadata.time_period:
+            hints.append(f"Focus on the time period: {metadata.time_period}.")
+        
+        # Add intent if present
+        if metadata.intent:
+            hints.append(f"The query intent appears to be: {metadata.intent}.")
+        
+        # Add topic focus if present
+        if metadata.topics:
+            topics = ", ".join(metadata.topics)
+            hints.append(f"The query relates to these topics: {topics}.")
+            
+        if hints:
+            return "Additional context for your response:\n" + "\n".join(hints)
+        return ""
+        
+    def _create_metadata_filters(self, metadata: QueryMetadata) -> Optional[Dict]:
+        """
+        Convert extracted query metadata to filters for retrieval synchronously.
+        
+        Args:
+            metadata: QueryMetadata object with extracted metadata
+            
+        Returns:
+            Dictionary with metadata filters or None
+        """
+        filters = {}
+        
+        # Person filter (most important for personalized content)
+        if metadata.entities["person"]:
+            # Use the first person mentioned as the filter
+            filters["person_name"] = metadata.entities["person"][0]
+            
+        # Organization filter if present
+        if metadata.entities["organization"] and not filters:
+            # Only add org filter if person filter isn't present (person is more specific)
+            filters["organization"] = metadata.entities["organization"][0]
+            
+        # Topic filter if applicable and specific enough
+        if len(metadata.topics) == 1:
+            # Only add single topic filter to avoid over-constraining
+            topic = metadata.topics[0]
+            if topic not in ["technology", "business", "education", "healthcare"]:
+                # Only add specific topics, not general categories
+                filters["topics"] = topic
+                
+        return filters if filters else None
 
     async def query_async(self, query: str) -> str:
         """Submit an asynchronous query and return a query ID"""
@@ -173,8 +287,18 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
     async def process_async_query(self, query_id: str, query: str):
         """Process an async query (called by Kafka consumer) using the two-step process"""
         try:
-            # Get relevant chunks
-            chunks = await self.document_service.search_similar_chunks(query)
+            # Extract metadata from the query for better understanding
+            query_metadata = self._extract_query_metadata(query)
+            
+            # Use the processed query if available, otherwise use original
+            query_to_use = query_metadata.processed_query or query
+            logger.info(f"Processing async query {query_id} with processed query: '{query_to_use}'")
+            
+            # Convert extracted metadata to filters if applicable
+            metadata_filters = self._create_metadata_filters(query_metadata)
+            
+            # Get relevant chunks using the semantic metadata-then-content search
+            chunks = await self.document_service.semantic_metadata_then_content_search(query_to_use)
             
             if not chunks:
                 self.query_results[query_id] = QueryResult(
@@ -182,7 +306,8 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
                     answer="I couldn't find any relevant information to answer your query.",
                     source_chunks=[],
                     status="completed",
-                    chunk_responses=[]
+                    chunk_responses=[],
+                    query_metadata=query_metadata
                 )
                 return
                 
@@ -199,7 +324,7 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
             logger.info(f"Processing query {query_id}: Analyzing {len(chunks)} chunks individually")
             chunk_responses = []
             for i, context in enumerate(contexts):
-                chunk_response = await self._process_chunk_with_llm(query, context)
+                chunk_response = await self._process_chunk_with_llm(query_to_use, context)
                 chunk_responses.append(chunk_response)
                 logger.debug(f"Chunk {i+1} response: {chunk_response[:100]}...")  # Log first 100 chars
 
@@ -207,7 +332,11 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
             sources = [chunk.source for chunk in chunks]
             logger.info(f"Processing query {query_id}: Generating summary from {len(chunk_responses)} chunk responses")
             
-            summary = await self._generate_summary_from_chunk_responses(query, chunk_responses, sources)
+            # Include query metadata hints in the summary prompt
+            metadata_hints = self._get_metadata_hints(query_metadata)
+            
+            # Generate summary
+            summary = await self._generate_summary_with_metadata(query_to_use, chunk_responses, sources, query_metadata)
 
             # Store result with both final answer and individual chunk responses
             self.query_results[query_id] = QueryResult(
@@ -215,9 +344,10 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
                 answer=summary,
                 source_chunks=chunks,
                 status="completed",
-                chunk_responses=chunk_responses
+                chunk_responses=chunk_responses,
+                query_metadata=query_metadata
             )
-            logger.info(f"Completed query {query_id} with two-step processing")
+            logger.info(f"Completed query {query_id} with metadata-enhanced processing")
             
         except Exception as e:
             logger.error(f"Error processing query {query_id}: {e}", exc_info=True)
@@ -226,8 +356,39 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
                 answer=f"Error: {str(e)}",
                 source_chunks=[],
                 status="error",
-                chunk_responses=[]
+                chunk_responses=[],
+                query_metadata=QueryMetadata()
             )
+            
+    async def _generate_summary_with_metadata(self, query: str, chunk_responses: List[str],
+                                           sources: List[str], metadata: QueryMetadata) -> str:
+        """Generate a summary response from chunks with metadata context"""
+        # Create a special prompt for summarizing the chunk responses
+        summary_context = "\n\n".join([
+            f"Response {i+1}: {resp}" for i, resp in enumerate(chunk_responses)
+        ])
+        
+        sources_text = "\n".join([f"- {source}" for source in set(sources)])
+        
+        # Include query metadata hints
+        metadata_hints = self._get_metadata_hints(metadata)
+        
+        summary_prompt = f"""I've analyzed the query: "{query}" against multiple text chunks and received these responses:
+
+{summary_context}
+
+The information comes from these sources:
+{sources_text}
+
+{metadata_hints}
+
+Please synthesize a comprehensive, coherent answer based on all these responses. Combine the information logically, 
+avoid redundancy, and ensure all key points are covered. Include specific references to sources where appropriate.
+"""
+        
+        # Using a dedicated method for summary to avoid mixing with normal contexts
+        summary_response = await self.llm_manager.generate_summary(summary_prompt)
+        return summary_response
 
     async def get_completed_queries(self) -> List[Dict]:
         """Get a list of all completed queries"""
@@ -247,3 +408,36 @@ avoid redundancy, and ensure all key points are covered. Include specific refere
         # Sort by newest first (if we add timestamps later)
         # For now return in order of completion
         return completed_queries
+
+    async def _extract_metadata_filters(self, query: str) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Extract metadata filters from the query.
+        Returns a tuple of (metadata_filters, processed_query).
+        If no filters are found, returns (None, None).
+        """
+        # Use simple pattern matching to identify queries about skills of a specific person
+        import re
+        
+        # Look for patterns like "skills of [name]" or "[name]'s skills" or "skills for [name]"
+        person_patterns = [
+            r"skills of ([A-Za-z\s]+)",
+            r"([A-Za-z\s]+)'s skills",
+            r"skills for ([A-Za-z\s]+)",
+            r"what skills does ([A-Za-z\s]+) have",
+            r"what are ([A-Za-z\s]+)'s skills"
+        ]
+        
+        for pattern in person_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                person_name = match.group(1).strip()
+                logger.info(f"Extracted person name '{person_name}' from query: '{query}'")
+                
+                # Create metadata filter for the person name
+                metadata_filters = {"person_name": person_name}
+                
+                # Return both the filters and the original query
+                return metadata_filters, query
+        
+        # No person name found in the query
+        return None, None

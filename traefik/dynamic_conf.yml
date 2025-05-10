@@ -7,12 +7,22 @@ http:
           X-Service-Registry: "true"
     
     # Service-specific middlewares for rewriting paths
-    rag-api-strip:
+    document-service-stripprefix:
       stripPrefix:
         prefixes:
-          - "/api/rag"
+          - "/api/documents"
     
-    doc-processor-strip:
+    llm-service-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/api/llm"
+    
+    query-service-stripprefix:
+      stripPrefix:
+        prefixes:
+          - "/api/query"
+          
+    doc-processor-stripprefix:
       stripPrefix:
         prefixes:
           - "/api/document-processor"

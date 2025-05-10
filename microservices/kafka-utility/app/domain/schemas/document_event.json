@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Document Event Schema",
+  "description": "Schema for document processing events",
+  "type": "object",
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["messageType", "version", "timestamp"],
+      "properties": {
+        "messageType": {
+          "type": "string",
+          "enum": ["document.created", "document.processed", "document.failed", "document.deleted", "document.updated", "document.metadata_requested", "document.metadata_extracted"]
+        },
+        "version": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "correlationId": {
+          "type": "string"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "required": ["documentId"],
+      "properties": {
+        "documentId": {
+          "type": "string"
+        },        "status": {
+          "type": "string",
+          "enum": ["created", "processing", "completed", "failed", "deleted", "metadata_requested", "metadata_extracted"]
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "fileType": {
+          "type": "string"
+        },
+        "fileSize": {
+          "type": "integer"
+        },
+        "userId": {
+          "type": "string"
+        },        "metadata": {
+          "type": "object"
+        },
+        "documentPath": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "chunks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chunkId": {
+                "type": "string"
+              },
+              "pageNumber": {
+                "type": "integer"
+              },
+              "content": {
+                "type": "string"
+              },
+              "embedding": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["metadata", "payload"]
+}

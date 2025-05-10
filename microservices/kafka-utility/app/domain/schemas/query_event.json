@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Query Event Schema",
+  "description": "Schema for query processing events",
+  "type": "object",
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["messageType", "version", "timestamp"],
+      "properties": {
+        "messageType": {
+          "type": "string",
+          "enum": ["query.submitted", "query.processing", "query.completed", "query.failed"]
+        },
+        "version": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "correlationId": {
+          "type": "string"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "required": ["queryId"],
+      "properties": {
+        "queryId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["submitted", "processing", "completed", "failed"]
+        },
+        "filters": {
+          "type": "object"
+        },
+        "documentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "results": {
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "string"
+            },
+            "sourceChunks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "documentId": {
+                    "type": "string"
+                  },
+                  "chunkId": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          }
+        },
+        "processingTime": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "required": ["metadata", "payload"]
+}

@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLM Task Schema",
+  "description": "Schema for LLM task events",
+  "type": "object",
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["messageType", "version", "timestamp"],
+      "properties": {
+        "messageType": {
+          "type": "string",
+          "enum": ["llm.embedding.request", "llm.embedding.response", "llm.completion.request", "llm.completion.response", "llm.task.failed"]
+        },
+        "version": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "correlationId": {
+          "type": "string"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "required": ["taskId"],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "taskType": {
+          "type": "string",
+          "enum": ["embedding", "completion"]
+        },
+        "model": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "input": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "embeddingResults": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "completionResults": {
+          "type": "string"
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "topP": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "stopSequences": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          }
+        },
+        "processingTime": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "required": ["metadata", "payload"]
+}

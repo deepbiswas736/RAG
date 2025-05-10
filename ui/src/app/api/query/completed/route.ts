@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 // GET /api/query/completed - get list of completed queries
 export async function GET() {
   try {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000/query/completed';
+    const queryServiceUrl = process.env.NEXT_PUBLIC_QUERY_SERVICE_URL || '/api/query';
+    const backendUrl = `${queryServiceUrl}/completed`;
     console.log(`Fetching completed queries from: ${backendUrl}`);
     
     const res = await fetch(backendUrl, {

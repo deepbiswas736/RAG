@@ -4,8 +4,11 @@ FROM python:3.9-slim
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     poppler-utils \
+    curl\
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates \
     && which pdftoppm && pdftoppm -v  # Verify poppler installation
 
 WORKDIR /app
