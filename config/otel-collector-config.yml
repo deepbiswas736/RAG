@@ -1,0 +1,76 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1000
+    spike_limit_mib: 200
+
+  probabilistic_sampler:
+    hash_seed: 22
+    sampling_percentage: 100 # Sample all requests for now
+
+  resource:
+    attributes:
+      - key: environment
+        value: "production"
+        action: upsert
+      - key: deployment.region
+        value: ${DEPLOYMENT_REGION}
+        action: upsert
+      - key: service.namespace
+        value: "rag"
+        action: upsert
+
+exporters:
+  logging:
+    verbosity: detailed
+
+  elasticsearch/trace:
+    endpoints: ["http://elasticsearch:9200"]
+    index: "traces-%{YYYY.MM.DD}"
+    # Enable TLS and auth in production
+    # tls:
+    #   ca_file: /path/to/ca.crt
+    #   cert_file: /path/to/client.crt
+    #   key_file: /path/to/client.key
+    # auth:
+    #   username: ${ES_USERNAME}
+    #   password: ${ES_PASSWORD}
+
+  elasticsearch/metrics:
+    endpoints: ["http://elasticsearch:9200"]
+    index: "metrics-%{YYYY.MM.DD}"
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "rag"
+    const_labels:
+      deployment: "production"
+
+extensions:
+  health_check:
+  pprof:
+  zpages:
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, probabilistic_sampler, batch, resource]
+      exporters: [elasticsearch/trace, logging]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus, logging]

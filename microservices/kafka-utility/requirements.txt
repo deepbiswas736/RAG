@@ -1,6 +1,6 @@
 # Core dependencies
-kafka-python>=2.0.2
-aiokafka>=0.7.2
+kafka-python>=3.1.0  # Upgraded from 2.0.2
+aiokafka>=0.10.0    # Upgraded from 0.7.2
 jsonschema>=4.17.3
 pydantic>=2.0.0
 python-dotenv>=1.0.0
@@ -9,10 +9,16 @@ python-dotenv>=1.0.0
 asyncio>=3.4.3
 aiohttp>=3.8.4
 
-# Utilities
+# Observability
 tenacity>=8.2.2   # For retry functionality
 structlog>=23.1.0  # For structured logging
 prometheus-client>=0.16.0  # For metrics
+opentelemetry-api>=1.19.0
+opentelemetry-sdk>=1.19.0
+opentelemetry-instrumentation-fastapi>=0.40b0
+opentelemetry-instrumentation-kafka>=0.40b0
+opentelemetry-exporter-otlp>=1.19.0
+opentelemetry-propagator-b3>=1.19.0
 
 # Optional dependency for Avro serialization
 fastavro>=1.7.3

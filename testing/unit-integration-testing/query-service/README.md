@@ -92,7 +92,7 @@ The test environment is configured with the following default parameters:
 - Document Service URL: `http://localhost:8000`
 - LLM Service URL: `http://localhost:8001`
 - Query Service URL: `http://localhost:8002`
-- MongoDB URL: `mongodb://user:password@localhost:27017`
+- MongoDB URL: `mongodb://user:password@mongodb:27017`
 - Metadata Search: Enabled
 
 These parameters can be overridden by setting environment variables before running the tests.

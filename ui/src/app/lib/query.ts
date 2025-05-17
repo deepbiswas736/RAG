@@ -1,10 +1,12 @@
+"use client";
+
 import { useState } from "react";
 
 export function useQuery() {
   const [query, setQuery] = useState("");
   const [syncResult, setSyncResult] = useState("");
   const [asyncResult, setAsyncResult] = useState("");
-  const [asyncId, setAsyncId] = useState("");
+  const [, setAsyncId] = useState(""); // Changed this line
 
   async function handleSyncQuery(e: React.FormEvent) {
     e.preventDefault();

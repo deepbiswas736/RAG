@@ -1,0 +1,5 @@
+This is a test document for validating RAG system functionality.
+
+It includes multiple paragraphs and sections to test the chunking capability.
+
+The system should properly process this document and extract meaningful chunks.

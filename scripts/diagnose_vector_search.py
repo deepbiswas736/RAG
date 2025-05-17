@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 async def diagnose_vector_search():
     # Connection settings - using the same ones from your app
-    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@localhost:27017/?authSource=admin&directConnection=true')
+    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true')
     db_name = "test_vector_db"
     vector_dimension = 384
     

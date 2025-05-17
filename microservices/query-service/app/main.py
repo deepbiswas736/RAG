@@ -17,8 +17,9 @@ import asyncio
 import uvicorn
 import uuid
 
-from . import config
-from .application.services.query_processor import QueryProcessor
+# Use absolute imports instead of relative imports
+import config
+from application.services.query_processor import QueryProcessor
 from .domain.models.query import Query, QueryType
 from .domain.interfaces.query_repository import QueryRepository
 from .domain.interfaces.llm_service_client import LLMServiceClient
@@ -84,7 +85,7 @@ class StreamingResponseModel(BaseModel):
 # API configuration
 class ApiConfig:
     # MongoDB connection
-    MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+    MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://mongodb:27017")
     MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "query_db")
     
     # Service URLs

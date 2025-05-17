@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { uploadFileToDocumentService } from '@/lib/apiService'; // Import the centralized API service
 
 export async function POST(req: NextRequest) {
   console.log('API route /api/upload called');
@@ -12,41 +13,23 @@ export async function POST(req: NextRequest) {
     }
     
     console.log(`File received: ${file.name}, size: ${file.size} bytes`);
-      // Forward to Document Service
-    const documentServiceUrl = process.env.NEXT_PUBLIC_DOCUMENT_SERVICE_URL || '/api/documents';
-    const uploadUrl = `${documentServiceUrl}`;
-    console.log(`Uploading file to document service: ${uploadUrl}`);
     
-    try {
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-      });
-      
-      console.log(`Backend response status: ${uploadRes.status}`);
-      
-      if (!uploadRes.ok) {
-        console.error(`Backend upload failed with status: ${uploadRes.status}, ${uploadRes.statusText}`);
-        const errorText = await uploadRes.text().catch(() => 'No response body');
-        console.error(`Error response: ${errorText}`);
-        return NextResponse.json(
-          { error: `Upload failed: ${uploadRes.statusText}` }, 
-          { status: uploadRes.status }
-        );
-      }
-      
-      const data = await uploadRes.json();
-      console.log(`Upload successful, response:`, data);
-      return NextResponse.json(data);
-    } catch (error) {
-      console.error('Error communicating with backend:', error);
-      return NextResponse.json({ 
-        error: 'Failed to upload file: Backend communication error',
-        details: error instanceof Error ? error.message : String(error)
-      }, { status: 500 });
+    // Use the centralized API service to upload the file
+    const data = await uploadFileToDocumentService(formData);
+    
+    console.log(`Upload successful, response:`, data);
+    return NextResponse.json(data);
+
+  } catch (error: unknown) {
+    console.error('Error in /api/upload route:', error);
+    // Check if the error is from our apiService, which includes a status
+    if (error && typeof error === 'object' && 'error' in error && 'status' in error && typeof error.status === 'number') {
+      return NextResponse.json(
+        { error: (error as {error: string}).error, details: (error as {details?: string}).details },
+        { status: error.status }
+      );
     }
-  } catch (error) {
-    console.error('Error processing upload request:', error);
+    // Generic error handling for other types of errors
     return NextResponse.json({ 
       error: 'Failed to process upload request',
       details: error instanceof Error ? error.message : String(error)

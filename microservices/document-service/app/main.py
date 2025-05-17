@@ -30,12 +30,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import application services
-from application.services.document_service import DocumentService, DocumentDTO
-from domain.services.document_processing_service import DocumentProcessingService
-from domain.services.chunking_service import ChunkingService
-from infrastructure.blob.blob_store import BlobStore
-from infrastructure.persistence.mongodb_document_repository import MongoDBDocumentRepository
-from infrastructure.messaging.kafka_client import KafkaClient
+try:
+    from application.services.document_service import DocumentService, DocumentDTO
+    from domain.services.document_processing_service import DocumentProcessingService
+    from domain.services.chunking_service import ChunkingService
+    from infrastructure.blob.blob_store import BlobStore
+    from infrastructure.persistence.mongodb_document_repository import MongoDBDocumentRepository
+    from infrastructure.messaging.kafka_client import KafkaClient
+except ImportError:
+    # Try alternative import paths
+    from app.application.services.document_service import DocumentService, DocumentDTO
+    from app.domain.services.document_processing_service import DocumentProcessingService
+    from app.domain.services.chunking_service import ChunkingService
+    from app.infrastructure.blob.blob_store import BlobStore
+    from app.infrastructure.persistence.mongodb_document_repository import MongoDBDocumentRepository
+    from app.infrastructure.messaging.kafka_client import KafkaClient
 
 # Define service name and version
 SERVICE_NAME = "DocumentService"
@@ -44,8 +53,8 @@ SERVICE_VERSION = "1.0.0"
 # API configuration
 class ApiConfig:
     # MongoDB connection
-    MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-    MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "document_db")
+    MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://user:password@mongodb:27017/rag_db?authSource=admin&replicaSet=rs0&retryWrites=true")
+    MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "rag_db")
     
     # MinIO configuration
     MINIO_URL = os.getenv("MINIO_URL", "localhost:9000")
@@ -130,16 +139,16 @@ async def service_info(request: Request):
         "version": SERVICE_VERSION,
         "hostname": hostname,
         "endpoints": [
-            {"path": "/documents", "methods": ["GET", "POST"], "description": "Document operations"},
-            {"path": "/documents/{document_id}", "methods": ["GET", "DELETE"], "description": "Document details and deletion"},
-            {"path": "/documents/{document_id}/download", "methods": ["GET"], "description": "Download document"},
-            {"path": "/documents/{document_id}/chunks", "methods": ["GET"], "description": "Get document chunks"},
-            {"path": "/documents/convert", "methods": ["POST"], "description": "Convert document to PDF"},
+            {"path": "/api/documents", "methods": ["GET", "POST"], "description": "Document operations"},
+            {"path": "/api/documents/{document_id}", "methods": ["GET", "DELETE"], "description": "Document details and deletion"},
+            {"path": "/api/documents/{document_id}/download", "methods": ["GET"], "description": "Download document"},
+            {"path": "/api/documents/{document_id}/chunks", "methods": ["GET"], "description": "Get document chunks"},
+            {"path": "/api/documents/convert", "methods": ["POST"], "description": "Convert document to PDF"},
         ]
     }
 
 # Document endpoints
-@app.post("/documents", response_model=DocumentDTO)
+@app.post("/api/documents", response_model=DocumentDTO)
 async def create_document(
     file: UploadFile,
     user_id: Optional[str] = Form(None),
@@ -161,7 +170,7 @@ async def create_document(
         metadata=parsed_metadata
     )
 
-@app.get("/documents", response_model=Dict[str, Any])
+@app.get("/api/documents", response_model=Dict[str, Any])
 async def list_documents(
     skip: int = 0,
     limit: int = 100,
@@ -197,12 +206,12 @@ async def list_documents(
         "limit": limit
     }
 
-@app.get("/documents/{document_id}", response_model=DocumentDTO)
+@app.get("/api/documents/{document_id}", response_model=DocumentDTO)
 async def get_document(document_id: str):
     """Get document metadata"""
     return await document_service.get_document(document_id)
 
-@app.delete("/documents/{document_id}")
+@app.delete("/api/documents/{document_id}")
 async def delete_document(document_id: str):
     """Delete a document"""
     result = await document_service.delete_document(document_id)
@@ -211,7 +220,7 @@ async def delete_document(document_id: str):
     else:
         raise HTTPException(status_code=500, detail="Failed to delete document")
 
-@app.get("/documents/{document_id}/download")
+@app.get("/api/documents/{document_id}/download")
 async def download_document(document_id: str):
     """Download document file"""
     file_content, filename, content_type = await document_service.download_document(document_id)
@@ -223,13 +232,13 @@ async def download_document(document_id: str):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-@app.get("/documents/{document_id}/chunks")
+@app.get("/api/documents/{document_id}/chunks")
 async def get_document_chunks(document_id: str):
     """Get chunks for a document"""
     chunks = await document_service.get_document_chunks(document_id)
     return {"chunks": chunks, "count": len(chunks)}
 
-@app.post("/documents/convert")
+@app.post("/api/documents/convert")
 async def convert_to_pdf(file: UploadFile):
     """Convert a document to PDF"""
     pdf_content, pdf_filename = await document_service.convert_to_pdf(file)

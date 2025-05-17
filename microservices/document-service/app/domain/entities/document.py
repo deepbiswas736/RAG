@@ -89,6 +89,10 @@ class Document:
             
         if isinstance(data.get("updated_at"), str):
             data["updated_at"] = datetime.fromisoformat(data["updated_at"])
+        
+        # Map '_id' from MongoDB to 'id' in Document dataclass
+        if "_id" in data:
+            data["id"] = str(data.pop("_id"))
             
         return cls(**data)
 

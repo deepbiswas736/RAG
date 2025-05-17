@@ -1,5 +1,5 @@
 "use client";
-import { useDocuments, Document } from "../lib/documents";
+import { useDocuments } from "../lib/documents";
 
 export default function DocumentsPage() {
   const { 

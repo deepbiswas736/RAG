@@ -11,13 +11,23 @@ from datetime import datetime
 
 @dataclass
 class MessageMetadata:
-    """Represents message metadata."""
+    """Represents message metadata with W3C trace context support."""
     message_type: str
     version: str = "1.0"
     timestamp: int = field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
     correlation_id: Optional[str] = None
-    partition_key: Optional[str] = None
+    trace_context: Dict[str, str] = field(default_factory=lambda: {
+        "traceparent": "",  # W3C trace parent
+        "tracestate": "",   # W3C trace state
+    })
+    parent_id: Optional[str] = None  # Parent message correlation ID
+    causation_id: Optional[str] = None  # ID that caused this message
+    sequence_number: Optional[int] = None  # Message sequence in a flow
     source_service: Optional[str] = None
+    source_operation: Optional[str] = None
+    destination_service: Optional[str] = None
+    retry_count: int = 0
+    error_details: Optional[Dict[str, Any]] = None
     headers: Dict[str, str] = field(default_factory=dict)
 
 

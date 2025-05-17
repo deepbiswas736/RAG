@@ -13,7 +13,7 @@ from typing import Dict, Any, List
 # Set environment variables for test
 os.environ['DOCUMENT_SERVICE_URL'] = 'http://localhost:8000'
 os.environ['LLM_SERVICE_URL'] = 'http://localhost:8001'
-os.environ['MONGODB_URL'] = 'mongodb://user:password@localhost:27017'
+os.environ['MONGODB_URL'] = 'mongodb://user:password@mongodb:27017'
 os.environ['ENABLE_METADATA_SEARCH'] = 'True'
 
 

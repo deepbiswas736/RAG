@@ -1,8 +1,8 @@
 """Kafka Utility clients."""
 
-from ..clients.document_service import DocumentServiceKafkaClient
-from ..clients.query_service import QueryServiceKafkaClient
-from ..clients.llm_service import LLMServiceKafkaClient
+from .document_service import DocumentServiceKafkaClient
+from .query_service import QueryServiceKafkaClient
+from .llm_service import LLMServiceKafkaClient
 
 __all__ = [
     "DocumentServiceKafkaClient",

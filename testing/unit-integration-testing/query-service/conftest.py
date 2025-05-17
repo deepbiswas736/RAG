@@ -144,5 +144,5 @@ def pytest_configure(config):
     os.environ.setdefault('DOCUMENT_SERVICE_URL', 'http://localhost:8000')
     os.environ.setdefault('LLM_SERVICE_URL', 'http://localhost:8001')
     os.environ.setdefault('QUERY_SERVICE_URL', 'http://localhost:8002')
-    os.environ.setdefault('MONGODB_URL', 'mongodb://user:password@localhost:27017')
+    os.environ.setdefault('MONGODB_URL', 'mongodb://user:password@mongodb:27017')
     os.environ.setdefault('ENABLE_METADATA_SEARCH', 'True')

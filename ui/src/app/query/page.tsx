@@ -1,3 +1,4 @@
+'use client';
 import { useQuery } from "../lib/query";
 
 export default function QueryPage() {

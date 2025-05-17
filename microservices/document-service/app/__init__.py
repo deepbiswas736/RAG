@@ -1,0 +1,3 @@
+"""
+Document Service module initialization.
+"""

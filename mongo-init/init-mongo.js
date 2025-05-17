@@ -1,7 +1,24 @@
 // MongoDB initialization script
 print("Starting MongoDB initialization...");
 
-// Connect to admin database to create user
+// Verify replica set is working properly
+print("Checking replica set status...");
+try {
+  const rsStatus = rs.status();
+  print("Replica set status: " + rsStatus.ok);
+  if (rsStatus.ok !== 1) {
+    print("Warning: Replica set is not properly initialized!");
+    printjson(rsStatus);
+    throw new Error("Replica set initialization failed");
+  } else {
+    print("Replica set is properly initialized.");
+  }
+} catch (e) {
+  print("Error checking replica set status: " + e.message);
+  // Don't fail here, continue with initialization
+}
+
+// Connect to admin database
 db = db.getSiblingDB('admin');
 print("Connected to admin database");
 

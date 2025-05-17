@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class MongoDBDocumentRepository(DocumentRepository):
     def __init__(self):
         # Updated default URL to include authSource and directConnection
-        self.mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@localhost:27017/?authSource=admin&directConnection=true')
+        self.mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true')
         self.db_name = os.getenv('MONGODB_DB_NAME', 'rag_db')
         self.vector_index_name = os.getenv('MONGODB_VECTOR_INDEX_NAME', 'vector_index')
         self.vector_dimension = int(os.getenv('VECTOR_DIMENSION', '384'))

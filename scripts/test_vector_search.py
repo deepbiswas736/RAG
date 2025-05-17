@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def test_vector_search():
     # Get MongoDB connection details from environment
     # Updated default URL to include authSource and directConnection
-    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@localhost:27017/?authSource=admin&directConnection=true')
+    mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true')
     db_name = os.getenv('MONGODB_DB_NAME', 'rag_db')
     vector_dimension = int(os.getenv('VECTOR_DIMENSION', '384'))
     

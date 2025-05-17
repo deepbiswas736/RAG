@@ -9,9 +9,17 @@ import os
 import mimetypes
 import tempfile
 import asyncio
+import json
 from typing import List, Dict, Optional, Any, BinaryIO, Tuple, Union
 from dataclasses import dataclass
 from fastapi import UploadFile, HTTPException
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.resources import Resource
 
 from domain.entities.document import Document, DocumentChunk
 from domain.repositories.document_repository import DocumentRepository
@@ -20,8 +28,44 @@ from domain.services.chunking_service import ChunkingService
 from infrastructure.blob.blob_store import BlobStore
 from infrastructure.messaging.kafka_client import KafkaClient
 
-# Configure logging
-logger = logging.getLogger(__name__)
+# Configure OpenTelemetry
+resource = Resource.create({"service.name": "document-service"})
+trace.set_tracer_provider(TracerProvider(resource=resource))
+otlp_exporter = OTLPSpanExporter(endpoint="otel-collector:4317", insecure=True)
+span_processor = BatchSpanProcessor(otlp_exporter)
+trace.get_tracer_provider().add_span_processor(span_processor)
+tracer = trace.get_tracer(__name__)
+
+# Configure structured logging
+class StructuredLogger:
+    def __init__(self, name):
+        self.logger = logging.getLogger(name)
+        self.service_name = "document-service"
+    
+    def _log(self, level, message, **kwargs):
+        span_context = trace.get_current_span().get_span_context()
+        log_data = {
+            "message": message,
+            "service": self.service_name,
+            "trace_id": format(span_context.trace_id, "032x"),
+            "span_id": format(span_context.span_id, "016x"),
+            **kwargs
+        }
+        self.logger.log(level, json.dumps(log_data))
+    
+    def info(self, message, **kwargs):
+        self._log(logging.INFO, message, **kwargs)
+        
+    def error(self, message, **kwargs):
+        self._log(logging.ERROR, message, **kwargs)
+        
+    def warning(self, message, **kwargs):
+        self._log(logging.WARNING, message, **kwargs)
+        
+    def debug(self, message, **kwargs):
+        self._log(logging.DEBUG, message, **kwargs)
+
+logger = StructuredLogger(__name__)
 
 @dataclass
 class DocumentDTO:
@@ -96,55 +140,74 @@ class DocumentService:
         Returns:
             Document DTO
         """
-        try:
-            # Read file content
-            file_content = await file.read()
+        with tracer.start_as_current_span("upload_document") as span:
+            span.set_attribute("file.name", file.filename)
+            span.set_attribute("file.size", file.size if hasattr(file, 'size') else 0)
+            span.set_attribute("user.id", user_id or "anonymous")
             
-            # Create a document entity
-            document = Document(
-                name=file.filename,
-                file_type=os.path.splitext(file.filename)[1].lower().lstrip("."),
-                file_size=len(file_content),
-                content_type=file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream",
-                created_by=user_id,
-                metadata=metadata or {}
-            )
-            
-            # Save document to repository
-            document = await self.document_repository.save_document(document)
-            
-            # Save file to blob storage
-            blob_path = await self.blob_store.save_file(
-                file_content=file.file,
-                file_name=file.filename,
-                content_type=document.content_type
-            )
-            
-            # Update document with blob path
-            document.blob_path = blob_path
-            document = await self.document_repository.update_document(document)
-            
-            # Send document created event
-            await self.kafka_client.send_document_created_event(
-                document_id=document.id,
-                metadata={
-                    "name": document.name,
-                    "file_type": document.file_type,
-                    "file_size": document.file_size,
-                    "content_type": document.content_type
-                }
-            )
-            
-            # Start processing document asynchronously
-            asyncio.create_task(self._process_document(document.id))
-            
-            # Convert to DTO
-            return self._document_to_dto(document)
-            
-        except Exception as e:
-            logger.error(f"Error uploading document: {e}")
-            raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
-            
+            try:
+                # Read file content
+                file_content = await file.read()
+                
+                # Create a document entity
+                document = Document(
+                    name=file.filename,
+                    file_type=os.path.splitext(file.filename)[1].lower().lstrip("."),
+                    file_size=len(file_content),
+                    content_type=file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream",
+                    created_by=user_id,
+                    metadata=metadata or {}
+                )
+                
+                with tracer.start_span("save_document_to_repository") as save_span:
+                    # Save document to repository
+                    document = await self.document_repository.save_document(document)
+                    save_span.set_attribute("document.id", document.id)
+                
+                with tracer.start_span("save_to_blob_storage") as blob_span:
+                    # Save file to blob storage
+                    blob_path = await self.blob_store.save_file(
+                        file_content=file.file,
+                        file_name=file.filename,
+                        content_type=document.content_type
+                    )
+                    blob_span.set_attribute("blob.path", blob_path)
+                
+                # Update document with blob path
+                document.blob_path = blob_path
+                document = await self.document_repository.update_document(document)
+                
+                with tracer.start_span("send_document_created_event") as event_span:
+                    # Send document created event
+                    await self.kafka_client.send_document_created_event(
+                        document_id=document.id,
+                        metadata={
+                            "name": document.name,
+                            "file_type": document.file_type,
+                            "file_size": document.file_size,
+                            "content_type": document.content_type
+                        }
+                    )
+                
+                # Start processing document asynchronously
+                asyncio.create_task(self._process_document(document.id))
+                
+                span.set_status(Status(StatusCode.OK))
+                logger.info("Document uploaded successfully", 
+                           document_id=document.id,
+                           file_name=document.name,
+                           file_size=document.file_size)
+                
+                # Convert to DTO
+                return self._document_to_dto(document)
+                
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR), str(e))
+                logger.error("Error uploading document",
+                           error=str(e),
+                           file_name=file.filename)
+                raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
+                
     async def _process_document(self, document_id: str):
         """
         Process document asynchronously
@@ -152,88 +215,108 @@ class DocumentService:
         Args:
             document_id: ID of document to process
         """
-        try:
-            # Get document
-            document = await self.document_repository.get_document_by_id(document_id)
-            if not document:
-                logger.error(f"Document not found for processing: {document_id}")
-                return
+        with tracer.start_as_current_span("process_document") as span:
+            span.set_attribute("document.id", document_id)
+            
+            try:
+                # Get document
+                document = await self.document_repository.get_document_by_id(document_id)
+                if not document:
+                    logger.error("Document not found for processing",
+                               document_id=document_id)
+                    span.set_status(Status(StatusCode.ERROR), "Document not found")
+                    return
                 
-            # Update processing status
-            document.update_processing_status("processing")
-            await self.document_repository.update_document(document)
-            
-            # Get file from blob storage
-            file_content, _ = await self.blob_store.get_file(document.blob_path)
-            
-            # Extract text from document
-            text, error = await self.document_processor.extract_text(
-                file_content=file_content.getvalue(),
-                file_extension=f".{document.file_type}"
-            )
-            
-            if error:
-                logger.error(f"Error extracting text from document {document_id}: {error}")
-                document.update_processing_status("failed", error)
+                # Update processing status
+                document.update_processing_status("processing")
                 await self.document_repository.update_document(document)
+                
+                with tracer.start_span("extract_text") as extract_span:
+                    # Get file from blob storage
+                    file_content, _ = await self.blob_store.get_file(document.blob_path)
+                    
+                    # Extract text from document
+                    text, error = await self.document_processor.extract_text(
+                        file_content=file_content.getvalue(),
+                        file_extension=f".{document.file_type}"
+                    )
+                    
+                    if error:
+                        logger.error("Error extracting text from document",
+                                   document_id=document_id,
+                                   error=error)
+                        extract_span.set_status(Status(StatusCode.ERROR), error)
+                        document.update_processing_status("failed", error)
+                        await self.document_repository.update_document(document)
+                        await self.kafka_client.send_document_processed_event(
+                            document_id=document_id,
+                            status="failed",
+                            metadata={"error": error}
+                        )
+                        return
+                
+                with tracer.start_span("request_metadata_extraction") as metadata_span:
+                    # Request metadata extraction in parallel
+                    metadata_task = asyncio.create_task(self.kafka_client.send_metadata_extraction_request(
+                        document_id=document_id,
+                        document_path=document.blob_path,
+                        file_type=document.file_type
+                    ))
+                
+                # Continue with text processing
+                # Update document with extracted text
+                document.text_content = text
+                document = await self.document_repository.update_document(document)
+                
+                # Wait for metadata extraction request to complete
+                try:
+                    await metadata_task
+                    logger.info("Metadata extraction requested",
+                              document_id=document_id)
+                except Exception as e:
+                    logger.error("Failed to request metadata extraction",
+                               document_id=document_id,
+                               error=str(e))
+                    # Continue processing even if metadata extraction request fails
+                
+                # Process successful
+                document.update_processing_status("completed")
+                await self.document_repository.update_document(document)
+                
+                # Send document processed event
+                await self.kafka_client.send_document_processed_event(
+                    document_id=document_id,
+                    status="completed"
+                )
+                
+                # Chunk the document
+                await self._chunk_document(document_id, text)
+                
+                span.set_status(Status(StatusCode.OK))
+                
+            except Exception as e:
+                logger.error("Error processing document",
+                           document_id=document_id,
+                           error=str(e))
+                span.set_status(Status(StatusCode.ERROR), str(e))
+                
+                # Update document with error
+                try:
+                    document = await self.document_repository.get_document_by_id(document_id)
+                    if document:
+                        document.update_processing_status("failed", str(e))
+                        await self.document_repository.update_document(document)
+                except Exception as update_error:
+                    logger.error("Error updating document with error",
+                               document_id=document_id,
+                               error=str(update_error))
+                
+                # Send document processed event with error
                 await self.kafka_client.send_document_processed_event(
                     document_id=document_id,
                     status="failed",
-                    metadata={"error": error}
+                    error=str(e)
                 )
-                return
-                
-            # Request metadata extraction in parallel
-            metadata_task = asyncio.create_task(self.kafka_client.send_metadata_extraction_request(
-                document_id=document_id,
-                document_path=document.blob_path,
-                file_type=document.file_type
-            ))
-            
-            # Continue with text processing
-            # Update document with extracted text
-            document.text_content = text
-            document = await self.document_repository.update_document(document)
-            
-            # Wait for metadata extraction request to complete
-            try:
-                await metadata_task
-                logger.info(f"Metadata extraction requested for document {document_id}")
-            except Exception as e:
-                logger.error(f"Failed to request metadata extraction for document {document_id}: {e}")
-                # Continue processing even if metadata extraction request fails
-            
-            # Process successful
-            document.update_processing_status("completed")
-            await self.document_repository.update_document(document)
-            
-            # Send document processed event
-            await self.kafka_client.send_document_processed_event(
-                document_id=document_id,
-                status="completed"
-            )
-            
-            # Chunk the document
-            await self._chunk_document(document_id, text)
-            
-        except Exception as e:
-            logger.error(f"Error processing document {document_id}: {e}")
-            
-            # Update document with error
-            try:
-                document = await self.document_repository.get_document_by_id(document_id)
-                if document:
-                    document.update_processing_status("failed", str(e))
-                    await self.document_repository.update_document(document)
-            except Exception as update_error:
-                logger.error(f"Error updating document with error: {update_error}")
-                
-            # Send document processed event with error
-            await self.kafka_client.send_document_processed_event(
-                document_id=document_id,
-                status="failed",
-                error=str(e)
-            )
             
     async def _chunk_document(self, document_id: str, text: str):
         """
@@ -254,57 +337,59 @@ class DocumentService:
             await self.document_repository.delete_chunks_by_document_id(document_id)
             
             # Chunk document with semantic boundaries
-            chunks = self.chunking_service.chunk_with_semantic_boundaries(
-                text=text,
-                metadata={
-                    "document_id": document_id,
-                    "document_name": document.name,
-                    "document_type": document.file_type
-                }
-            )
+            try:
+                chunks = self.chunking_service.chunk_with_semantic_boundaries(
+                    text=text,
+                    metadata={
+                        "document_id": document_id,
+                        "document_name": document.name,
+                        "document_type": document.file_type
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Error during document chunking: {e}")
+                return
             
-            # Save chunks
+            if not chunks:
+                logger.warning(f"No chunks created for document: {document_id}")
+                return
+                
+            # Save chunks with retry logic
+            failed_chunks = []
             for i, chunk in enumerate(chunks):
-                document_chunk = DocumentChunk(
-                    document_id=document_id,
-                    chunk_index=i,
-                    text=chunk["text"],
-                    metadata=chunk["metadata"]
-                )
-                
-                # Save chunk
-                document_chunk = await self.document_repository.save_chunk(document_chunk)
-                
-                # Request embedding for the chunk
-                await self.kafka_client.send_embedding_request(
-                    document_id=document_id,
-                    chunk_id=document_chunk.id,
-                    text=document_chunk.text
-                )
-                
-            # Update document with chunk information
-            document.update_chunking_status(True, len(chunks))
-            await self.document_repository.update_document(document)
+                try:
+                    document_chunk = DocumentChunk(
+                        document_id=document_id,
+                        chunk_index=i,
+                        text=chunk["text"],
+                        metadata=chunk.get("metadata", {})
+                    )
+                    await self.document_repository.save_chunk(document_chunk)
+                    logger.debug(f"Saved chunk {i} for document {document_id}")
+                except Exception as e:
+                    logger.error(f"Failed to save chunk {i} for document {document_id}: {e}")
+                    failed_chunks.append(i)
             
-            # Send document chunks created event
-            await self.kafka_client.send_document_chunks_created_event(
+            if failed_chunks:
+                logger.warning(f"Failed to save {len(failed_chunks)} chunks for document {document_id}")
+            else:
+                logger.info(f"Successfully processed and saved {len(chunks)} chunks for document {document_id}")
+                
+            # Update document status
+            await self.document_repository.update_document_status(
                 document_id=document_id,
-                chunk_count=len(chunks)
+                is_chunked=True,
+                chunk_count=len(chunks) - len(failed_chunks)
             )
-            
-            logger.info(f"Document {document_id} chunked into {len(chunks)} chunks")
             
         except Exception as e:
-            logger.error(f"Error chunking document {document_id}: {e}")
-            
-            # Update document status
-            try:
-                document = await self.document_repository.get_document_by_id(document_id)
-                if document:
-                    document.update_chunking_status(False)
-                    await self.document_repository.update_document(document)
-            except Exception as update_error:
-                logger.error(f"Error updating document chunking status: {update_error}")
+            logger.error(f"Error in chunking document {document_id}: {e}")
+            # Update document status to indicate failure
+            await self.document_repository.update_document_status(
+                document_id=document_id,
+                is_chunked=False,
+                processing_error=str(e)
+            )
             
     async def get_document(self, document_id: str) -> DocumentDTO:
         """

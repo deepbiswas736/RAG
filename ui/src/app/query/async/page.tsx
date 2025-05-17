@@ -3,10 +3,16 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 
+interface SourceMetadata {
+  page_number?: number;
+  content_type?: string;
+  [key: string]: unknown;
+}
+
 interface Source {
   content: string;
   source: string;
-  metadata: Record<string, any>;
+  metadata: SourceMetadata;
 }
 
 interface QueryResult {

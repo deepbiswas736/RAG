@@ -19,7 +19,8 @@ build/
 .vscode/
 
 # Node.js
-ui/node_modules/
+*/scripts/
+*/node_modules/
 ui/.next/
 ui/.env
 ui/.env.*

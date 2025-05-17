@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 class MongoDBDocumentRepository(DocumentRepository):
     """MongoDB implementation of the document repository"""
-    
     def __init__(
         self,
         connection_string: Optional[str] = None,
@@ -34,13 +33,24 @@ class MongoDBDocumentRepository(DocumentRepository):
             connection_string: MongoDB connection string
             db_name: Database name
         """
-        self.connection_string = connection_string or os.getenv(
-            "MONGODB_URL", "mongodb://localhost:27017"
-        )
-        self.db_name = db_name or os.getenv("MONGODB_DB_NAME", "document_db")
+        # Prioritize MONGO_URI, then MONGODB_URL, then the default
+        self.connection_string = os.getenv("MONGO_URI") or \
+                                 os.getenv("MONGODB_URL") or \
+                                 connection_string or \
+                                 "mongodb://user:password@mongodb:27017/document_service?authSource=admin&replicaSet=rs0&retryWrites=true"
         
-        # Connect to MongoDB
-        self._client = MongoClient(self.connection_string)
+        self.db_name = db_name or os.getenv("MONGODB_DB_NAME", "document_db")
+        logger.info(f"Attempting to connect to MongoDB with connection string: {self.connection_string}") # Added log
+        
+        # Connect to MongoDB with replica set awareness
+        connect_kwargs = {
+            "serverSelectionTimeoutMS": 5000,  # 5 seconds timeout for server selection
+            "connectTimeoutMS": 10000,         # 10 seconds connection timeout
+            "socketTimeoutMS": 30000,          # 30 seconds socket timeout
+            "retryWrites": True,               # Enable retry for write operations
+        }
+        
+        self._client = MongoClient(self.connection_string, **connect_kwargs)
         self._db = self._client[self.db_name]
         
         # Define collections
@@ -51,10 +61,14 @@ class MongoDBDocumentRepository(DocumentRepository):
         self._create_indices()
         
         logger.info(f"MongoDB repository initialized with database: {self.db_name}")
-        
+
     def _create_indices(self):
         """Create necessary indices for performance"""
         try:
+            # First verify we can connect to MongoDB
+            # Use the existing client to ping the server
+            self._client.admin.command('ping')
+            
             # Document collection indices
             self.documents_collection.create_index([("name", ASCENDING)])
             self.documents_collection.create_index([("processing_status", ASCENDING)])

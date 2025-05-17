@@ -209,65 +209,162 @@ class ChunkingService:
         """
         Advanced chunking that tries to respect semantic boundaries like headers,
         paragraphs, and sentences.
-        
-        Args:
-            text: The text to split
-            chunk_size: Size of each chunk in characters
-            chunk_overlap: Overlap between chunks in characters
-            metadata: Additional metadata to include with each chunk
-            
-        Returns:
-            List of chunk dictionaries with text and metadata
         """
         # Use default values if not provided
         chunk_size = chunk_size or self.default_chunk_size
         chunk_overlap = chunk_overlap or self.default_chunk_overlap
         
-        # First detect section headers (advanced)
-        # Look for patterns like "Chapter X", "Section X", numbered sections, etc.
-        section_pattern = r'(?:^|\n)(?:#{1,6}|(?:CHAPTER|Chapter|Section|SECTION|Part|PART)\s+[\dIVXLC]+:?)'
+        # Validate parameters
+        if chunk_size > self.max_chunk_size:
+            logger.warning(f"Chunk size {chunk_size} exceeds maximum {self.max_chunk_size}. Using maximum.")
+            chunk_size = self.max_chunk_size
+            
+        if chunk_size < self.min_chunk_size:
+            logger.warning(f"Chunk size {chunk_size} below minimum {self.min_chunk_size}. Using minimum.")
+            chunk_size = self.min_chunk_size
+            
+        if chunk_overlap >= chunk_size:
+            logger.warning(f"Overlap {chunk_overlap} >= chunk size {chunk_size}. Setting to half of chunk size.")
+            chunk_overlap = chunk_size // 2
         
-        # Split by potential section headers
+        # Clean and normalize text
+        text = self._clean_text(text)
+        if not text.strip():
+            return []
+            
+        # Detect section boundaries
+        section_pattern = r'(?:^|\n)(?:#{1,6}|(?:CHAPTER|Chapter|Section|SECTION|Part|PART)\s+[\dIVXLC]+:?|\d+\.(?:\d+\.)*\s+[A-Z])'
         sections = re.split(f'({section_pattern})', text)
         
-        # Recombine headers with their content
-        processed_sections = []
-        i = 0
-        while i < len(sections):
-            if i + 1 < len(sections) and re.match(section_pattern, sections[i]):
-                # It's a header, combine with the next section
-                processed_sections.append(sections[i] + sections[i+1])
-                i += 2
-            else:
-                processed_sections.append(sections[i])
-                i += 1
-        
+        # Process sections
         all_chunks = []
-        for section in processed_sections:
+        current_section = None
+        section_content = ""
+        
+        for i, section in enumerate(sections):
             if not section.strip():
                 continue
                 
-            # For each section, perform regular chunking
-            section_chunks = self.chunk_text(
-                section, 
-                chunk_size=chunk_size, 
-                chunk_overlap=chunk_overlap,
-                metadata=metadata
+            # Check if this is a header
+            if re.match(section_pattern, section):
+                # Process previous section if exists
+                if section_content:
+                    section_chunks = self._process_section(
+                        section_content,
+                        current_section,
+                        chunk_size,
+                        chunk_overlap,
+                        metadata
+                    )
+                    all_chunks.extend(section_chunks)
+                
+                current_section = section.strip()
+                section_content = ""
+            else:
+                section_content += section
+        
+        # Process the last section
+        if section_content:
+            section_chunks = self._process_section(
+                section_content,
+                current_section,
+                chunk_size,
+                chunk_overlap,
+                metadata
             )
-            
-            # Add section info to metadata if possible
-            section_title = self._extract_section_title(section)
-            if section_title:
-                for chunk in section_chunks:
-                    chunk["metadata"]["section_title"] = section_title
-            
             all_chunks.extend(section_chunks)
         
-        # Renumber chunk indices
-        for i, chunk in enumerate(all_chunks):
-            chunk["metadata"]["chunk_index"] = i
+        # Validate and fix chunk sizes
+        validated_chunks = []
+        for chunk in all_chunks:
+            if len(chunk["text"]) > self.max_chunk_size:
+                # Split oversized chunks
+                sub_chunks = self._split_oversized_chunk(
+                    chunk["text"],
+                    chunk["metadata"],
+                    chunk_size,
+                    chunk_overlap
+                )
+                validated_chunks.extend(sub_chunks)
+            else:
+                validated_chunks.append(chunk)
         
-        return all_chunks
+        # Update chunk indices
+        for i, chunk in enumerate(validated_chunks):
+            chunk["metadata"]["chunk_index"] = i
+            
+        return validated_chunks
+        
+    def _process_section(
+        self,
+        content: str,
+        section_title: Optional[str],
+        chunk_size: int,
+        chunk_overlap: int,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Process a single section into chunks"""
+        # Base chunks
+        chunks = self.chunk_text(content, chunk_size, chunk_overlap, metadata)
+        
+        # Add section information if available
+        if section_title:
+            for chunk in chunks:
+                chunk["metadata"]["section_title"] = section_title
+                
+        return chunks
+        
+    def _split_oversized_chunk(
+        self,
+        text: str,
+        metadata: Dict[str, Any],
+        chunk_size: int,
+        chunk_overlap: int
+    ) -> List[Dict[str, Any]]:
+        """Split an oversized chunk into smaller valid chunks"""
+        # Find sentence boundaries
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        chunks = []
+        current_chunk = ""
+        current_sentences = []
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) > chunk_size and current_chunk:
+                # Store current chunk
+                chunks.append({
+                    "text": current_chunk.strip(),
+                    "metadata": {
+                        **metadata,
+                        "is_split": True,
+                        "original_chunk_index": metadata.get("chunk_index")
+                    }
+                })
+                
+                # Start new chunk with overlap
+                if chunk_overlap > 0:
+                    overlap_text = " ".join(current_sentences[-2:]) if len(current_sentences) > 1 else current_sentences[-1] if current_sentences else ""
+                    current_chunk = overlap_text + " " + sentence
+                else:
+                    current_chunk = sentence
+                    
+                current_sentences = [sentence]
+            else:
+                current_chunk += " " + sentence if current_chunk else sentence
+                current_sentences.append(sentence)
+        
+        # Add final chunk if exists
+        if current_chunk.strip():
+            chunks.append({
+                "text": current_chunk.strip(),
+                "metadata": {
+                    **metadata,
+                    "is_split": True,
+                    "original_chunk_index": metadata.get("chunk_index")
+                }
+            })
+            
+        return chunks
     
     def _extract_section_title(self, section_text: str) -> Optional[str]:
         """

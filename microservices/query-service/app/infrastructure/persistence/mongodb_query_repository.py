@@ -28,20 +28,33 @@ class MongoDBQueryRepository(QueryRepository):
             connection_string: Optional MongoDB connection string (default: environment variable)
             database_name: Optional database name (default: environment variable)
         """
-        self.connection_string = connection_string or os.environ.get("MONGODB_URL", "mongodb://localhost:27017")
-        self.database_name = database_name or os.environ.get("MONGODB_DB_NAME", "query_db")
+        # Prioritize MONGO_URI, then MONGODB_URL, then the passed argument, and finally the default
+        self.connection_string: str = os.environ.get("MONGO_URI") or \
+                                 os.environ.get("MONGODB_URL") or \
+                                 connection_string or \
+                                 "mongodb://user:password@mongodb:27017/query_db?authSource=admin&replicaSet=rs0&retryWrites=true"
         
-        self.client: Optional[AsyncIOMotorClient] = None
-        self.db: Optional[AsyncIOMotorDatabase] = None
+        self.database_name: str = database_name or os.environ.get("MONGODB_DB_NAME", "query_db")
+        
+        self.client: Any = None # Simplified type hint
+        self.db: Any = None # Simplified type hint
         
         logger.info(f"Initialized MongoDB query repository for database: {self.database_name}")
     
     async def connect(self):
         """Connect to MongoDB"""
-        if self.client is None:
-            self.client = AsyncIOMotorClient(self.connection_string)
+        if not self.client:
+            # Configure connection with replica set options
+            self.client = AsyncIOMotorClient(
+                self.connection_string,
+                serverSelectionTimeoutMS=5000,  # 5 seconds timeout for server selection
+                connectTimeoutMS=10000,         # 10 seconds connection timeout
+                socketTimeoutMS=30000,          # 30 seconds socket timeout
+                retryWrites=True                # Enable retry for write operations
+            )
             self.db = self.client[self.database_name]
             logger.info(f"Connected to MongoDB database: {self.database_name}")
+            logger.info(f"Successfully connected to MongoDB with connection string: {self.connection_string}")
     
     async def disconnect(self):
         """Disconnect from MongoDB"""

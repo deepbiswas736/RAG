@@ -86,7 +86,7 @@ class TestDocumentServiceIntegration:
         async def override_get_document_service():
             # Create repository
             document_repository = MongoDBDocumentRepository(
-                connection_string="mongodb://localhost:27017",
+                connection_string="mongodb://mongodb:27017",
                 db_name="test_db",
                 client=mock_mongodb_client
             )

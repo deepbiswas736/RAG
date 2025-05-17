@@ -34,3 +34,8 @@ aiolimiter>=1.0.0 # Rate limiting for async operations
 
 # Environment and configuration
 python-dotenv==1.0.0
+# Dependencies added by fix script
+nltk>=3.8.1
+scikit-learn>=1.3.0
+spacy>=3.6.1
+aiohttp>=3.8.6
