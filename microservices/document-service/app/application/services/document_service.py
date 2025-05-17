@@ -10,6 +10,7 @@ import mimetypes
 import tempfile
 import asyncio
 import json
+import io
 from typing import List, Dict, Optional, Any, BinaryIO, Tuple, Union
 from dataclasses import dataclass
 from fastapi import UploadFile, HTTPException
@@ -146,15 +147,23 @@ class DocumentService:
             span.set_attribute("user.id", user_id or "anonymous")
             
             try:
-                # Read file content
-                file_content = await file.read()
+                # Check if file is already a PDF
+                is_pdf = os.path.splitext(file.filename)[1].lower() == ".pdf"
+                span.set_attribute("file.is_pdf", is_pdf)
                 
-                # Create a document entity
+                # Convert file to PDF if needed
+                with tracer.start_span("convert_to_pdf") as convert_span:
+                    pdf_content, pdf_filename = await self.convert_to_pdf(file)
+                    convert_span.set_attribute("pdf.filename", pdf_filename)
+                    convert_span.set_attribute("pdf.size", len(pdf_content))
+                    convert_span.set_attribute("conversion_performed", not is_pdf)
+                
+                # Create a document entity with PDF properties
                 document = Document(
-                    name=file.filename,
-                    file_type=os.path.splitext(file.filename)[1].lower().lstrip("."),
-                    file_size=len(file_content),
-                    content_type=file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream",
+                    name=pdf_filename,
+                    file_type="pdf",  # Always PDF after conversion or already as PDF
+                    file_size=len(pdf_content),
+                    content_type="application/pdf",  # Always PDF content type
                     created_by=user_id,
                     metadata=metadata or {}
                 )
@@ -164,12 +173,15 @@ class DocumentService:
                     document = await self.document_repository.save_document(document)
                     save_span.set_attribute("document.id", document.id)
                 
+                # Create a file-like object from PDF content
+                pdf_file = io.BytesIO(pdf_content)
+                
                 with tracer.start_span("save_to_blob_storage") as blob_span:
-                    # Save file to blob storage
+                    # Save PDF file to blob storage
                     blob_path = await self.blob_store.save_file(
-                        file_content=file.file,
-                        file_name=file.filename,
-                        content_type=document.content_type
+                        file_content=pdf_file,
+                        file_name=pdf_filename,
+                        content_type="application/pdf"
                     )
                     blob_span.set_attribute("blob.path", blob_path)
                 
@@ -185,7 +197,8 @@ class DocumentService:
                             "name": document.name,
                             "file_type": document.file_type,
                             "file_size": document.file_size,
-                            "content_type": document.content_type
+                            "content_type": document.content_type,
+                            "converted": not is_pdf
                         }
                     )
                 
@@ -193,10 +206,17 @@ class DocumentService:
                 asyncio.create_task(self._process_document(document.id))
                 
                 span.set_status(Status(StatusCode.OK))
-                logger.info("Document uploaded successfully", 
-                           document_id=document.id,
-                           file_name=document.name,
-                           file_size=document.file_size)
+                if is_pdf:
+                    logger.info("PDF document uploaded successfully", 
+                               document_id=document.id,
+                               file_name=document.name,
+                               file_size=document.file_size)
+                else:
+                    logger.info("Document converted to PDF and uploaded successfully", 
+                               document_id=document.id,
+                               file_name=document.name,
+                               original_name=file.filename,
+                               file_size=document.file_size)
                 
                 # Convert to DTO
                 return self._document_to_dto(document)
@@ -208,7 +228,7 @@ class DocumentService:
                            file_name=file.filename)
                 raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
                 
-    async def _process_document(self, document_id: str):
+    async def  _process_document(self, document_id: str):
         """
         Process document asynchronously
         
@@ -556,12 +576,23 @@ class DocumentService:
             Tuple of (PDF content, PDF filename)
         """
         try:
+            # Check if file is already a PDF
+            file_extension = os.path.splitext(file.filename)[1].lower()
+            if file_extension == ".pdf":
+                # For PDF files, just read the content without conversion
+                file_content = await file.read()
+                file.file.seek(0)  # Reset file position after reading
+                logger.info(f"File {file.filename} is already a PDF, skipping conversion")
+                return file_content, file.filename
+            
+            # For non-PDF files, proceed with conversion
             # Read file content
             file_content = await file.read()
+            file.file.seek(0)  # Reset file position after reading
             
             # Convert to PDF
             pdf_content, error = await self.document_processor.convert_to_pdf(
-                file_content=file.file,
+                file_content=file_content,
                 file_name=file.filename
             )
             
