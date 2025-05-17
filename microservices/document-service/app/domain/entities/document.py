@@ -25,12 +25,15 @@ class Document:
     updated_at: datetime = field(default_factory=datetime.now)
     created_by: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    # Processing status
+      # Processing status
     is_processed: bool = False
     is_chunked: bool = False
     processing_status: str = "pending"  # pending, processing, completed, failed
     processing_error: Optional[str] = None
+    
+    # Content
+    text_content: str = ""
+    page_contents: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     
     # Chunk information
     chunk_count: int = 0
@@ -71,13 +74,14 @@ class Document:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "created_by": self.created_by,
-            "metadata": self.metadata,
-            "is_processed": self.is_processed,
+            "metadata": self.metadata,            "is_processed": self.is_processed,
             "is_chunked": self.is_chunked,
             "processing_status": self.processing_status,
             "processing_error": self.processing_error,
             "chunk_count": self.chunk_count,
-            "embedding_model": self.embedding_model
+            "embedding_model": self.embedding_model,
+            "text_content": self.text_content,
+            "page_contents": self.page_contents
         }
     
     @classmethod

@@ -148,8 +148,12 @@ services:
       - MINIO_URL=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
+      - OCR_LANGUAGE=eng
+      - PDF_DPI=300
     volumes:
       - ./data/document_storage:/app/data/storage
+      - ./data/pdf_processing:/app/data/pdf_processing
+      - ./data/ocr_processing:/app/data/ocr_processing
     depends_on:
       - kafka
       - mongodb

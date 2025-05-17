@@ -2,10 +2,14 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install required system packages
+# Install required system packages including Poppler and Tesseract
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    poppler-utils \
+    tesseract-ocr \
+    libtesseract-dev \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file

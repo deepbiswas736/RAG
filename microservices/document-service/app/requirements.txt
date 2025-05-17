@@ -12,15 +12,21 @@ pydantic>=1.9.0
 aiofiles>=0.8.0
 httpx>=0.22.0
 langchain>=0.0.142
+# PDF processing dependencies
+PyPDF2>=2.0.0  # Added PyPDF2 for PDF text extraction
 pdf2image>=1.16.0
 pytesseract>=0.3.9
+Pillow>=9.0.0  # Added explicit Pillow dependency for image processing
 numpy>=1.20.0
+
+# OpenTelemetry dependencies - using stable versions without beta requirements
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
-opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-instrumentation-fastapi
 opentelemetry-exporter-otlp>=1.20.0
-opentelemetry-instrumentation-aiohttp>=0.41b0
-opentelemetry-instrumentation-requests>=0.41b0
+# Removing problematic aiohttp instrumentation
+# opentelemetry-instrumentation-aiohttp
+opentelemetry-instrumentation-requests
 python-json-logger>=2.0.7
 elasticsearch[async]>=8.0.0
 
