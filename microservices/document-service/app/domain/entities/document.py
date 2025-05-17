@@ -30,10 +30,9 @@ class Document:
     is_chunked: bool = False
     processing_status: str = "pending"  # pending, processing, completed, failed
     processing_error: Optional[str] = None
-    
-    # Content
+      # Content
     text_content: str = ""
-    page_contents: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    page_contents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     
     # Chunk information
     chunk_count: int = 0

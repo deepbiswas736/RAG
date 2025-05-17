@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # Import application services
 try:
     from application.services.document_service import DocumentService, DocumentDTO
+    from application.services.document_management_service import DocumentManagementService
+    from application.services.background_document_processor import BackgroundDocumentProcessor
     from domain.services.document_processing_service import DocumentProcessingService
     from domain.services.chunking_service import ChunkingService
     from infrastructure.blob.blob_store import BlobStore
@@ -40,6 +42,8 @@ try:
 except ImportError:
     # Try alternative import paths
     from app.application.services.document_service import DocumentService, DocumentDTO
+    from app.application.services.document_management_service import DocumentManagementService
+    from app.application.services.background_document_processor import BackgroundDocumentProcessor
     from app.domain.services.document_processing_service import DocumentProcessingService
     from app.domain.services.chunking_service import ChunkingService
     from app.infrastructure.blob.blob_store import BlobStore
@@ -108,13 +112,27 @@ kafka_client = KafkaClient(bootstrap_servers=config.KAFKA_BOOTSTRAP_SERVERS)
 document_processor = DocumentProcessingService(document_processor_url=config.DOCUMENT_PROCESSOR_URL)
 chunking_service = ChunkingService()
 
-# Initialize application services
-document_service = DocumentService(
+# Initialize the background processor
+background_processor = BackgroundDocumentProcessor(
     document_repository=document_repository,
     document_processor=document_processor,
     blob_store=blob_store,
     chunking_service=chunking_service,
     kafka_client=kafka_client
+)
+
+# Initialize document management service
+document_management_service = DocumentManagementService(
+    document_repository=document_repository,
+    document_processor=document_processor,
+    blob_store=blob_store,
+    kafka_client=kafka_client,
+    background_processor=background_processor
+)
+
+# Initialize the facade document service
+document_service = DocumentService(
+    document_management_service=document_management_service
 )
 
 # Root endpoint

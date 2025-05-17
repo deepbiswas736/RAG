@@ -13,10 +13,13 @@ from opentelemetry.trace.status import Status, StatusCode
 from app.domain.entities.document import Document
 from app.application.dtos.document_dto import DocumentDTO, ChunkDTO
 from app.domain.repositories.document_repository import DocumentRepository
-from app.application.services.document_processing_service import DocumentProcessingService
+try:
+    from app.domain.services.document_processing_service import DocumentProcessingService
+except ImportError:
+    from app.application.services.document_processing_service import DocumentProcessingService
 from app.application.services.background_document_processor import BackgroundDocumentProcessor
-from app.infrastructure.blob_store import BlobStore
-from app.infrastructure.kafka_client import KafkaClient
+from app.infrastructure.blob.blob_store import BlobStore
+from app.infrastructure.messaging.kafka_client import KafkaClient
 
 
 logger = logging.getLogger(__name__)
@@ -91,17 +94,16 @@ class DocumentManagementService:
                     )
                 
                 asyncio.create_task(self.background_processor.process_document_background(document.id))
-                
                 span.set_status(Status(StatusCode.OK))
                 log_message = "PDF document uploaded successfully" if is_pdf else "Document converted to PDF and uploaded successfully"
-                logger.info(log_message, document_id=document.id, file_name=document.name, file_size=document.file_size,
-                            original_name=file.filename if not is_pdf else None)
+                logger.info(f"{log_message} - document_id: {document.id}, file_name: {document.name}, file_size: {document.file_size}, " +
+                            (f"original_name: {file.filename}" if not is_pdf else ""))
                 
                 return self._document_to_dto_internal(document) 
                 
             except Exception as e:
                 span.set_status(Status(StatusCode.ERROR), str(e))
-                logger.error("Error uploading document in management service", error=str(e), file_name=file.filename)
+                logger.error(f"Error uploading document in management service - error: {str(e)}, file_name: {file.filename}")
                 raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
 
     async def _convert_to_pdf_internal(self, file: UploadFile) -> Tuple[bytes, str]: 
@@ -142,13 +144,13 @@ class DocumentManagementService:
         try:
             document = await self.document_repository.get_document_by_id(document_id)
             if not document:
-                logger.warning(f"Document metadata not found for ID: {document_id}", document_id=document_id)
+                logger.warning(f"Document metadata not found for ID: {document_id}")
                 raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
             return self._document_to_dto_internal(document) 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error getting document metadata for {document_id}: {e}", document_id=document_id, error=str(e))
+            logger.error(f"Error getting document metadata for {document_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Error retrieving document metadata: {str(e)}")
             
     async def list_documents_metadata(
@@ -164,7 +166,7 @@ class DocumentManagementService:
             )
             return [self._document_to_dto_internal(doc) for doc in documents], total 
         except Exception as e:
-            logger.error(f"Error listing documents metadata: {e}", error=str(e))
+            logger.error(f"Error listing documents metadata: {e}")
             raise HTTPException(status_code=500, detail=f"Error listing documents metadata: {str(e)}")
             
     async def delete_document_and_data(self, document_id: str) -> bool:
@@ -172,27 +174,27 @@ class DocumentManagementService:
         try:
             document = await self.document_repository.get_document_by_id(document_id)
             if not document:
-                logger.warning(f"Document not found for deletion: {document_id}", document_id=document_id)
+                logger.warning(f"Document not found for deletion: {document_id}")
                 raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
                 
             if document.blob_path:
                 await self.blob_store.delete_file(document.blob_path)
-                logger.info(f"Blob deleted for document {document_id} at path: {document.blob_path}", document_id=document_id)
+                logger.info(f"Blob deleted for document {document_id} at path: {document.blob_path}")
             
             await self.document_repository.delete_chunks_by_document_id(document_id)
-            logger.info(f"Chunks deleted for document {document_id}", document_id=document_id)
+            logger.info(f"Chunks deleted for document {document_id}")
             
             result = await self.document_repository.delete_document(document_id)
             if result:
-                logger.info(f"Document record deleted successfully: {document_id}", document_id=document_id)
+                logger.info(f"Document record deleted successfully: {document_id}")
             else:
-                logger.warning(f"Document record deletion reported as unsuccessful for: {document_id}", document_id=document_id)
+                logger.warning(f"Document record deletion reported as unsuccessful for: {document_id}")
             return result
             
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error deleting document and data for {document_id}: {e}", document_id=document_id, error=str(e))
+            logger.error(f"Error deleting document and data for {document_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
             
     async def download_document_file(self, document_id: str) -> Tuple[BinaryIO, str, str]:
@@ -200,21 +202,21 @@ class DocumentManagementService:
         try:
             document = await self.document_repository.get_document_by_id(document_id)
             if not document:
-                logger.warning(f"Document not found for download: {document_id}", document_id=document_id)
+                logger.warning(f"Document not found for download: {document_id}")
                 raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
                 
             if not document.blob_path:
-                logger.error(f"Blob path not found for document {document_id}, cannot download.", document_id=document_id)
+                logger.error(f"Blob path not found for document {document_id}, cannot download.")
                 raise HTTPException(status_code=404, detail=f"File not found for document: {document_id}")
                 
             file_content_stream, _ = await self.blob_store.get_file(document.blob_path)
-            logger.info(f"File retrieved from blob storage for document {document_id}", document_id=document_id)
+            logger.info(f"File retrieved from blob storage for document {document_id}")
             return file_content_stream, document.name, document.content_type
             
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error downloading document file for {document_id}: {e}", document_id=document_id, error=str(e))
+            logger.error(f"Error downloading document file for {document_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Error downloading document file: {str(e)}")
             
     async def get_document_chunks_data(self, document_id: str) -> List[ChunkDTO]: 
@@ -222,11 +224,11 @@ class DocumentManagementService:
         try:
             document = await self.document_repository.get_document_by_id(document_id)
             if not document:
-                logger.warning(f"Document not found when trying to get chunks: {document_id}", document_id=document_id)
+                logger.warning(f"Document not found when trying to get chunks: {document_id}")
                 raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
                 
             chunks = await self.document_repository.get_chunks_by_document_id(document_id)
-            logger.info(f"Retrieved {len(chunks)} chunks for document {document_id}", document_id=document_id, count=len(chunks))
+            logger.info(f"Retrieved {len(chunks)} chunks for document {document_id}")
             
             return [
                 ChunkDTO( 
@@ -239,7 +241,7 @@ class DocumentManagementService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error getting chunks data for document {document_id}: {e}", document_id=document_id, error=str(e))
+            logger.error(f"Error getting chunks data for document {document_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Error retrieving document chunks data: {str(e)}")
 
     def _document_to_dto_internal(self, document: Document) -> DocumentDTO: 

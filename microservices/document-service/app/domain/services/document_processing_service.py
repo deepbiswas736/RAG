@@ -231,11 +231,10 @@ class DocumentProcessingService:
             for page_num in sorted(page_contents.keys()):
                 combined_text += f"\n\n=== PAGE {page_num} ===\n\n"
                 combined_text += page_contents[page_num].text
-            
-            # Create structured page content representation
+              # Create structured page content representation
             structured_content = {
                 'document_text': combined_text.strip() if combined_text else "",
-                'pages': {page_num: page_contents[page_num].to_dict() for page_num in sorted(page_contents.keys())}
+                'pages': {str(page_num): page_contents[page_num].to_dict() for page_num in sorted(page_contents.keys())}
             }
             
             if combined_text:

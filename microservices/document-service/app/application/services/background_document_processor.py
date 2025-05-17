@@ -49,7 +49,7 @@ class BackgroundDocumentProcessor:
             try:
                 document: Document = await self.document_repository.get_document_by_id(document_id)
                 if not document:
-                    logger.error("Document not found for background processing", document_id=document_id)
+                    logger.error(f"Document not found for background processing - document_id: {document_id}")
                     span.set_status(Status(StatusCode.ERROR), "Document not found")
                     return
                 
@@ -64,7 +64,7 @@ class BackgroundDocumentProcessor:
                     )
                     
                     if error:
-                        logger.error("Error extracting text from document in background", document_id=document_id, error=error)
+                        logger.error(f"Error extracting text from document in background - document_id: {document_id}, error: {error}")
                         extract_span.set_status(Status(StatusCode.ERROR), error)
                         document.update_processing_status("failed", error)
                         await self.document_repository.update_document(document)
@@ -77,69 +77,64 @@ class BackgroundDocumentProcessor:
                 if hasattr(document, 'page_contents'): 
                     document.page_contents = structured_content.get('pages', {})
                 document = await self.document_repository.update_document(document)
-                logger.info(f"Document text content updated for {document_id} in background", document_id=document_id)
+                logger.info(f"Document text content updated for {document_id} in background")
 
-                logger.info(f"Starting chunking for document {document_id} in background", document_id=document_id)
+                logger.info(f"Starting chunking for document {document_id} in background")
                 await self._chunk_document_internal(document_id, document.text_content)
 
                 document: Document = await self.document_repository.get_document_by_id(document_id) # Re-fetch
                 if not document:
-                    logger.error("Document not found after chunking attempt in background", document_id=document_id)
+                    logger.error(f"Document not found after chunking attempt in background - document_id: {document_id}")
                     span.set_status(Status(StatusCode.ERROR), "Document not found post-chunking")
                     await self.kafka_client.send_document_processed_event(
                         document_id=document_id, status="failed", metadata={"error": "Document not found post-chunking"}
                     )
                     return
-                
-                logger.info(f"Chunking completed for document {document_id}. Is chunked: {document.is_chunked}, Chunks: {document.chunk_count}",
-                            document_id=document_id, is_chunked=document.is_chunked, chunk_count=document.chunk_count)
+                logger.info(f"Chunking completed for document {document_id}. Is chunked: {document.is_chunked}, Chunks: {document.chunk_count}")
 
                 if document.is_chunked and document.chunk_count > 0:
                     with tracer.start_as_current_span("request_metadata_extraction_background") as metadata_span:
                         try:
-                            logger.info(f"Requesting metadata extraction for document {document_id} in background", document_id=document_id)
+                            logger.info(f"Requesting metadata extraction for document {document_id} in background")
                             await self.kafka_client.send_metadata_extraction_request(
                                 document_id=document.id, document_path=document.blob_path, file_type=document.file_type
                             )
                             metadata_span.set_attribute("document.id", document.id)
-                            logger.info("Metadata extraction requested successfully after chunking in background", document_id=document.id)
+                            logger.info(f"Metadata extraction requested successfully after chunking in background - document_id: {document.id}")
                         except Exception as e:
-                            logger.error("Failed to request metadata extraction after chunking in background", document_id=document.id, error=str(e))
+                            logger.error(f"Failed to request metadata extraction after chunking in background - document_id: {document.id}, error: {str(e)}")
                             metadata_span.set_status(Status(StatusCode.ERROR), str(e))
                 elif document.is_chunked and document.chunk_count == 0:
-                    logger.warning(f"Chunking resulted in 0 chunks for document {document.id}. Skipping metadata extraction.", document_id=document.id)
-                else:
-                    logger.warning(f"Skipping metadata extraction for document {document.id} as chunking was not successful or produced no chunks. "
-                                   f"Chunking error: {document.processing_error}", document_id=document.id, chunking_error=document.processing_error)
+                    logger.warning(f"Chunking resulted in 0 chunks for document {document.id}. Skipping metadata extraction.")
+                else:                    logger.warning(f"Skipping metadata extraction for document {document.id} as chunking was not successful or produced no chunks. "
+                                   f"Chunking error: {document.processing_error}")
                 
                 final_doc_status = "completed"
                 event_status_for_kafka = "completed"
                 event_metadata_for_kafka = {}
 
                 if not document.is_chunked:
-                    logger.error(f"Document processing completed for {document.id}, but chunking failed. Error: {document.processing_error}",
-                                 document_id=document.id, error=document.processing_error)
+                    logger.error(f"Document processing completed for {document.id}, but chunking failed. Error: {document.processing_error}")
                     event_status_for_kafka = "failed" 
                     event_metadata_for_kafka["error"] = document.processing_error or "Chunking failed."
                     event_metadata_for_kafka["details"] = "Text extraction succeeded, but chunking failed."
                 elif document.chunk_count == 0:
-                    logger.warning(f"Document processing completed for {document.id}, text extracted, but 0 chunks created.", document_id=document.id)
+                    logger.warning(f"Document processing completed for {document.id}, text extracted, but 0 chunks created.")
                     event_status_for_kafka = "completed_with_no_chunks"
                     event_metadata_for_kafka["info"] = "Text extraction succeeded, but 0 chunks were created."
                 else:
-                     logger.info(f"Document processing and chunking completed successfully for {document_id} in background.", document_id=document.id)
+                    logger.info(f"Document processing and chunking completed successfully for {document_id} in background.")
 
                 document.update_processing_status(final_doc_status, document.processing_error)
                 await self.document_repository.update_document(document)
                 
                 await self.kafka_client.send_document_processed_event(
                     document_id=document.id, status=event_status_for_kafka, metadata=event_metadata_for_kafka
-                )
-                
+                )                
                 span.set_status(Status(StatusCode.OK))
                 
             except Exception as e:
-                logger.error("Error processing document in background", document_id=document_id, error=str(e))
+                logger.error(f"Error processing document in background - document_id: {document_id}, error: {str(e)}")
                 span.set_status(Status(StatusCode.ERROR), str(e))
                 
                 try:
@@ -148,7 +143,7 @@ class BackgroundDocumentProcessor:
                         doc_to_update.update_processing_status("failed", str(e))
                         await self.document_repository.update_document(doc_to_update)
                 except Exception as update_error:
-                    logger.error("Error updating document with error status in background", document_id=document_id, error=str(update_error))
+                    logger.error(f"Error updating document with error status in background - document_id: {document_id}, error: {str(update_error)}")
                 
                 await self.kafka_client.send_document_processed_event(
                     document_id=document_id, status="failed", metadata={"error": str(e)}
@@ -162,7 +157,7 @@ class BackgroundDocumentProcessor:
         try:
             document: Document = await self.document_repository.get_document_by_id(document_id)
             if not document:
-                logger.error(f"Document not found for chunking (internal): {document_id}", document_id=document_id)
+                logger.error(f"Document not found for chunking (internal): {document_id}")
                 return
             
             await self.document_repository.delete_chunks_by_document_id(document_id)
@@ -178,7 +173,7 @@ class BackgroundDocumentProcessor:
                     }
                 )
             except Exception as e:
-                logger.error(f"Error during document chunking service call: {e}", document_id=document_id, error=str(e))
+                logger.error(f"Error during document chunking service call: {e}, document_id: {document_id}")
                 await self.document_repository.update_document_status(
                     document_id=document_id, is_chunked=False, chunk_count=0,
                     processing_error=f"Chunking service failed: {str(e)}"
@@ -186,7 +181,7 @@ class BackgroundDocumentProcessor:
                 return
 
             if not chunks_data:
-                logger.warning(f"No chunks created by chunking service for document: {document_id}", document_id=document_id)
+                logger.warning(f"No chunks created by chunking service for document: {document_id}")
                 await self.document_repository.update_document_status(
                     document_id=document_id, is_chunked=True, chunk_count=0, processing_error=None
                 )
@@ -203,16 +198,16 @@ class BackgroundDocumentProcessor:
                     )
                     await self.document_repository.save_chunk(document_chunk)
                     saved_chunks_count += 1
-                    logger.debug(f"Saved chunk {i} for document {document_id}", document_id=document_id, chunk_index=i)
+                    logger.debug(f"Saved chunk {i} for document {document_id}")
                 except Exception as e:
-                    logger.error(f"Failed to save chunk {i} for document {document_id}: {e}", document_id=document_id, chunk_index=i, error=str(e))
+                    logger.error(f"Failed to save chunk {i} for document {document_id}: {e}")
             
             processing_err_msg = None
             if saved_chunks_count < len(chunks_data):
-                logger.warning(f"Failed to save {len(chunks_data) - saved_chunks_count} out of {len(chunks_data)} chunks for document {document_id}", document_id=document_id)
+                logger.warning(f"Failed to save {len(chunks_data) - saved_chunks_count} out of {len(chunks_data)} chunks for document {document_id}")
                 processing_err_msg = "Partial chunk saving failure"
             else:
-                logger.info(f"Successfully processed and saved {saved_chunks_count} chunks for document {document_id}", document_id=document_id, count=saved_chunks_count)
+                logger.info(f"Successfully processed and saved {saved_chunks_count} chunks for document {document_id}")
             
             await self.document_repository.update_document_status(
                 document_id=document_id, is_chunked=True, chunk_count=saved_chunks_count,
@@ -220,12 +215,12 @@ class BackgroundDocumentProcessor:
             )
             
         except Exception as e:
-            logger.error(f"Critical error in _chunk_document_internal for {document_id}: {e}", document_id=document_id, error=str(e))
+            logger.error(f"Critical error in _chunk_document_internal for {document_id}: {e}")
             try:
                 await self.document_repository.update_document_status(
                     document_id=document_id, is_chunked=False, chunk_count=0,
                     processing_error=f"Chunking failed: {str(e)}"
                 )
             except Exception as db_error:
-                logger.error(f"Failed to update document status after chunking error for {document_id}: {db_error}", document_id=document_id, error=str(db_error))
+                logger.error(f"Failed to update document status after chunking error for {document_id}: {db_error}")
 

@@ -2,7 +2,14 @@
 """
 PDF Processing Utilities
 ------------------------
-Utility functions for PDF processing, including text extraction and conversion.
+Utility functions for PDF processi        for page_num in sorted(page_contents_dict.keys()):
+            combined_text += f"\\n\\n=== PAGE {page_num} ===\\n\\n"
+            combined_text += page_contents_dict[page_num].text
+            
+        structured_content = {
+            'document_text': combined_text.strip() if combined_text else "",
+            'pages': {str(page_num): pc.to_dict() for page_num, pc in page_contents_dict.items()}
+        }cluding text extraction and conversion.
 """
 import io
 import logging
@@ -90,15 +97,14 @@ async def extract_text_from_pdf_content(pdf_content: bytes, pdf_dpi: int, ocr_pr
         for pc in extracted_pages:
             if pc:
                 page_contents_dict[pc.page_num] = pc
-        
         combined_text = ""
         for page_num in sorted(page_contents_dict.keys()):
-            combined_text += f"\\n\\n=== PAGE {page_num} ===\\n\\n"
+            combined_text += f"\n\n=== PAGE {page_num} ===\n\n"
             combined_text += page_contents_dict[page_num].text
-
+        
         structured_content = {
             'document_text': combined_text.strip() if combined_text else "",
-            'pages': {page_num: pc.to_dict() for page_num, pc in page_contents_dict.items()}
+            'pages': {str(page_num): pc.to_dict() for page_num, pc in page_contents_dict.items()}
         }
 
         if combined_text:

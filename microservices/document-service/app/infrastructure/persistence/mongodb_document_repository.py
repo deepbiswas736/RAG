@@ -331,11 +331,11 @@ class MongoDBDocumentRepository(DocumentRepository):
         except PyMongoError as e:
             logger.error(f"Error retrieving chunks for document {document_id}: {e}")
             raise
-            
+
     async def delete_chunks_by_document_id(self, document_id: str) -> bool:
         """
         Delete all chunks for a document
-        
+
         Args:
             document_id: ID of the document
             
@@ -374,3 +374,52 @@ class MongoDBDocumentRepository(DocumentRepository):
         # For now, we'll leave this as a placeholder
         logger.warning("Vector search not implemented in this repository")
         return []
+        
+    async def update_document_status(
+        self, 
+        document_id: str, 
+        is_chunked: bool, 
+        chunk_count: int,
+        processing_error: Optional[str] = None
+    ) -> bool:
+        """
+        Update document status fields related to chunking
+        
+        Args:
+            document_id: ID of the document
+            is_chunked: Whether the document has been chunked
+            chunk_count: Number of chunks created
+            processing_error: Optional error message
+            
+        Returns:
+            True if update was successful, False otherwise
+        """
+        try:
+            # Try to convert string ID to ObjectId
+            doc_id = document_id
+            if ObjectId.is_valid(document_id):
+                doc_id = ObjectId(document_id)
+                
+            # Query using both forms of ID for compatibility
+            query = {"$or": [{"id": document_id}, {"_id": doc_id}]}
+            
+            # Update only the specified fields
+            update = {
+                "$set": {
+                    "is_chunked": is_chunked,
+                    "chunk_count": chunk_count,
+                    "updated_at": datetime.now()
+                }
+            }
+            
+            if processing_error is not None:
+                update["$set"]["processing_error"] = processing_error
+                
+            result = self.documents_collection.update_one(query, update)
+            
+            logger.info(f"Document status updated: {document_id}, matched: {result.matched_count}")
+            return result.matched_count > 0
+            
+        except (PyMongoError, InvalidId) as e:
+            logger.error(f"Error updating document status for {document_id}: {e}")
+            raise
