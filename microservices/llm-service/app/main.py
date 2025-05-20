@@ -52,6 +52,40 @@ log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Configure OpenTelemetry Logging
+log_level_str = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
+from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+logger_provider = LoggerProvider(
+    resource=Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME", "llm-service")})
+)
+otlp_log_exporter = OTLPLogExporter(endpoint=os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4317"), insecure=True)
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
+logging.getLogger().addHandler(LoggingHandler(level=log_level, logger_provider=logger_provider))
+logging.getLogger().setLevel(log_level)
+
+# Configure OpenTelemetry Tracing (if not already configured)
+# Assuming traces might also be useful, setting up a basic trace provider.
+# If you have specific tracing setup elsewhere, this might need adjustment.
+if not trace.get_tracer_provider().__class__.__name__ == 'ProxyTracerProvider': # Check if a global tracer provider is already set
+    resource = Resource(attributes={
+        "service.name": os.environ.get("OTEL_SERVICE_NAME", "llm-service")
+    })
+    provider = TracerProvider(resource=resource)
+    otlp_trace_exporter = OTLPSpanExporter(endpoint=os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector:4317"), insecure=True)
+    processor = BatchSpanProcessor(otlp_trace_exporter)
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+
 # Define service name and version
 SERVICE_NAME = "LLMService"
 SERVICE_VERSION = "1.0.0"

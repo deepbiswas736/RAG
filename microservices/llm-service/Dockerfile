@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
 COPY llm-service/app/requirements.txt ./llm-requirements.txt
 COPY kafka_utility/requirements.txt ./kafka-utility-requirements.txt
 RUN pip install --no-cache-dir -r llm-requirements.txt uvicorn && \
-    pip install --no-cache-dir -r kafka-utility-requirements.txt
+    pip install --no-cache-dir -r kafka-utility-requirements.txt && \
+    pip install --no-cache-dir opentelemetry-exporter-otlp-proto-grpc opentelemetry-sdk opentelemetry-api opentelemetry-instrumentation-logging
 
 # Create a directory structure first and add __init__.py files
 RUN mkdir -p /app/application/services \

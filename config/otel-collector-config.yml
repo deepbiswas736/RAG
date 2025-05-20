@@ -52,6 +52,10 @@ exporters:
     endpoints: ["http://elasticsearch:9200"]
     index: "metrics-%{YYYY.MM.DD}"
 
+  elasticsearch/logs: # New exporter for logs
+    endpoints: ["http://elasticsearch:9200"]
+    index: "logs-rag-%{YYYY.MM.DD}" # Specific index for RAG logs
+
   prometheus:
     endpoint: "0.0.0.0:8889"
     namespace: "rag"
@@ -74,3 +78,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
       exporters: [prometheus, logging]
+    logs: # New pipeline for logs
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [elasticsearch/logs, logging]

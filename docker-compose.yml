@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # API Gateway and Service Registry
   traefik:
@@ -178,6 +176,10 @@ services:
       - OLLAMA_API_URL=http://ollama:11434
       - IN_DOCKER=true
       - LOG_LEVEL=DEBUG
+      - OTEL_SERVICE_NAME=llm-service
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4317
+      - OTEL_PYTHON_LOG_LEVEL=INFO
     depends_on:
       - kafka
       - ollama
