@@ -13,6 +13,7 @@ import logging
 import uvicorn
 import socket
 from typing import Dict, List, Optional
+from contextlib import asynccontextmanager # Add this import
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -39,6 +40,23 @@ class ApiConfig:
     # API root path
     ROOT_PATH = os.getenv("ROOT_PATH", "")
 
+# Dictionary to store active consumer tasks
+active_consumers = {}
+
+# Lifespan manager for startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    logger.info("Application startup: Starting consumers...")
+    # This will be implemented in the next steps (startup_event logic)
+    # For now, we'll just log
+    # await startup_event() # Replace with actual startup logic if it exists elsewhere or implement here
+    yield
+    # Shutdown logic
+    logger.info("Application shutdown: Stopping consumers...")
+    # This will be implemented in the next steps (shutdown_event logic)
+    # await shutdown_event() # Replace with actual shutdown logic if it exists elsewhere or implement here
+
 # Initialize configuration
 config = ApiConfig()
 
@@ -47,7 +65,8 @@ app = FastAPI(
     title="Kafka Utility Service",
     description="Kafka consumers and producers for the RAG system",
     version=SERVICE_VERSION,
-    root_path=config.ROOT_PATH
+    root_path=config.ROOT_PATH,
+    lifespan=lifespan # Add the lifespan manager here
 )
 
 # Configure CORS middleware
@@ -61,9 +80,6 @@ app.add_middleware(
 
 # Import and initialize all consumers and producers
 # This will be implemented in the next steps
-
-# Dictionary to store active consumer tasks
-active_consumers = {}
 
 # Root endpoint
 @app.get("/")
@@ -102,18 +118,18 @@ async def service_info(request: Request):
 # ...
 
 # Start all consumers on application startup
-@app.on_event("startup")
+# @app.on_event("startup") # Remove this decorator
 async def startup_event():
     """Start all consumers when the application starts"""
     # This will be implemented in the next steps
     pass
 
 # Stop all consumers on application shutdown
-@app.on_event("shutdown")
+# @app.on_event("shutdown") # Remove this decorator
 async def shutdown_event():
     """Stop all consumers when the application shuts down"""
     # This will be implemented in the next steps
     pass
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

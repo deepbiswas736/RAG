@@ -29,10 +29,27 @@ class KafkaHealthService:
             connection_timeout: Connection timeout in seconds
         """
         self.bootstrap_servers = bootstrap_servers
-        self.connection_timeout = connection_timeout
         self.admin_client = None
-        self.last_health_status = False
-    
+        self.is_healthy = False
+        logger.info(f"KafkaHealthService initialized with bootstrap_servers: {self.bootstrap_servers}")
+
+    async def _connect(self):
+        if self.admin_client:
+            return
+        try:
+            logger.info(f"Attempting to connect to Kafka for health check. Effective bootstrap_servers: {self.bootstrap_servers}, api_version='auto'")
+            self.admin_client = AIOKafkaAdminClient(
+                bootstrap_servers=self.bootstrap_servers,
+                client_id="kafka-health-checker",
+                api_version="auto", # Reverted to "auto"
+                request_timeout_ms=5000 # 5 seconds
+            )
+            logger.info("AIOKafkaAdminClient initialized for KafkaHealthService.")
+        except Exception as e:
+            logger.error(f"Error connecting to Kafka: {e}")
+            self.admin_client = None
+            raise
+
     async def check_kafka_availability(self) -> bool:
         """
         Check if Kafka is available by establishing a connection.
@@ -41,26 +58,19 @@ class KafkaHealthService:
             True if Kafka is available, False otherwise
         """
         try:
-            # Try to create an admin client connection to check availability
-            if self.admin_client is None:
-                self.admin_client = AIOKafkaAdminClient(
-                    bootstrap_servers=self.bootstrap_servers,
-                    client_id="kafka-utility-health-checker",
-                    request_timeout_ms=self.connection_timeout * 1000
-                )
-                await self.admin_client.start()
+            await self._connect()
             
             # List topics to verify connection
             topics = await self.admin_client.list_topics()
             logger.info(f"Kafka health check successful, found {len(topics)} topics")
             
             # Update status
-            self.last_health_status = True
+            self.is_healthy = True
             return True
             
         except KafkaConnectionError as e:
             logger.warning(f"Kafka connection failed: {e}")
-            self.last_health_status = False
+            self.is_healthy = False
             
             # Clean up admin client on connection failure
             if self.admin_client:
@@ -70,7 +80,7 @@ class KafkaHealthService:
             return False
         except Exception as e:
             logger.error(f"Kafka health check error: {e}")
-            self.last_health_status = False
+            self.is_healthy = False
             
             # Clean up admin client on any error
             if self.admin_client:
@@ -91,7 +101,7 @@ class KafkaHealthService:
             "bootstrap_servers": self.bootstrap_servers,
         }
         
-        if self.last_health_status and self.admin_client:
+        if self.is_healthy and self.admin_client:
             try:
                 # Get additional information if Kafka is available
                 status["topics"] = await self.admin_client.list_topics()

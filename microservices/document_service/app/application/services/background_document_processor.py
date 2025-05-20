@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import uuid
 
 from opentelemetry import trace
 from opentelemetry.trace.status import Status, StatusCode
@@ -191,6 +192,7 @@ class BackgroundDocumentProcessor:
             for i, chunk_item in enumerate(chunks_data):
                 try:
                     document_chunk = DocumentChunk( 
+                        id=str(uuid.uuid4()),  # Explicitly set the id
                         document_id=document_id,
                         chunk_index=i,
                         text=chunk_item["text"], 

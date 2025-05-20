@@ -1,9 +1,11 @@
 # Core dependencies
-kafka-python>=3.1.0  # Upgraded from 2.0.2
-aiokafka>=0.10.0    # Upgraded from 0.7.2
+kafka-python>=2.0.2  # Reinstated
+aiokafka>=0.11.0    # Upgraded for Kafka 3.6.x compatibility
 jsonschema>=4.17.3
 pydantic>=2.0.0
 python-dotenv>=1.0.0
+uvicorn>=0.20.0 # Added for FastAPI serving
+fastapi>=0.100.0 # Added for FastAPI framework
 
 # Async support
 asyncio>=3.4.3
@@ -16,7 +18,7 @@ prometheus-client>=0.16.0  # For metrics
 opentelemetry-api>=1.19.0
 opentelemetry-sdk>=1.19.0
 opentelemetry-instrumentation-fastapi>=0.40b0
-opentelemetry-instrumentation-kafka>=0.40b0
+# opentelemetry-instrumentation-kafka # Removed version constraint
 opentelemetry-exporter-otlp>=1.19.0
 opentelemetry-propagator-b3>=1.19.0
 

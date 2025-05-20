@@ -63,18 +63,21 @@ class TopicManagementService:
     Service for managing Kafka topics.
     """
     
-    def __init__(self, bootstrap_servers: str, topics: Optional[Dict[str, Dict[str, Any]]] = None):
+    def __init__(self, bootstrap_servers: str, client_id: str = "kafka_utility-topic-manager", 
+                 topics: Optional[Dict[str, Dict[str, Any]]] = None):
         """
         Initialize the topic management service.
         
         Args:
             bootstrap_servers: Kafka bootstrap servers, comma-separated
+            client_id: Client ID for Kafka
             topics: Optional dictionary of topics to manage, with configuration
         """
         self.bootstrap_servers = bootstrap_servers
-        self.topics = topics if topics is not None else DEFAULT_TOPICS
+        self.client_id = client_id
         self.admin_client = None
-    
+        logger.info(f"TopicManagementService initialized with bootstrap_servers: {self.bootstrap_servers}, client_id: {self.client_id}")
+
     async def _get_admin_client(self) -> AIOKafkaAdminClient:
         """
         Get or create an admin client.
@@ -83,11 +86,18 @@ class TopicManagementService:
             An initialized AIOKafkaAdminClient
         """
         if self.admin_client is None:
-            self.admin_client = AIOKafkaAdminClient(
-                bootstrap_servers=self.bootstrap_servers,
-                client_id="kafka-utility-topic-manager"
-            )
-            await self.admin_client.start()
+            try:
+                logger.info(f"Attempting to connect to Kafka for topic management. Effective bootstrap_servers: {self.bootstrap_servers}")
+                self.admin_client = AIOKafkaAdminClient(
+                    bootstrap_servers=self.bootstrap_servers,
+                    client_id=self.client_id,
+                    api_version="2.6.0" # Try based on kafka-python's detection
+                )
+                logger.info("AIOKafkaAdminClient initialized for TopicManagementService.")
+                await self.admin_client.start()
+            except Exception as e:
+                logger.error(f"Failed to initialize AIOKafkaAdminClient: {e}")
+                raise e
         return self.admin_client
     
     async def ensure_topic_exists(self, topic_name: str, partitions: int = 1, 

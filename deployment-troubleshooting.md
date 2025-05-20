@@ -22,7 +22,7 @@ The RAG application consists of several microservices and infrastructure compone
 | rag-document-service-1 | Exited (1) | Microservice - Failing |
 | rag-llm-service-1 | Exited (1) | Microservice - Failing |
 | rag-query-service-1 | Exited (1) | Microservice - Failing |
-| rag-kafka-utility-1 | Exited (1) | Microservice - Failing |
+| rag-kafka_utility-1 | Exited (1) | Microservice - Failing |
 
 ## Current Problems
 
@@ -30,7 +30,7 @@ The RAG application consists of several microservices and infrastructure compone
    - document-service
    - llm-service
    - query-service
-   - kafka-utility
+   - kafka_utility
 
 2. The document-processor and traefik services are running but in an unhealthy state.
 
@@ -51,7 +51,7 @@ We attempted to start each microservice individually using the `docker-compose u
    docker logs rag-document-service-1
    docker logs rag-llm-service-1
    docker logs rag-query-service-1
-   docker logs rag-kafka-utility-1
+   docker logs rag-kafka_utility-1
    ```
 
 2. **Verify Configuration** - Review the environment variables and configuration for each service in the docker-compose.yml file:

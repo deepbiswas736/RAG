@@ -10,8 +10,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies
-COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt uvicorn
+COPY llm-service/app/requirements.txt ./llm-requirements.txt
+COPY kafka_utility/requirements.txt ./kafka-utility-requirements.txt
+RUN pip install --no-cache-dir -r llm-requirements.txt uvicorn && \
+    pip install --no-cache-dir -r kafka-utility-requirements.txt
 
 # Create a directory structure first and add __init__.py files
 RUN mkdir -p /app/application/services \
@@ -37,25 +39,34 @@ RUN mkdir -p /app/application/services \
     && touch /app/infrastructure/messaging/__init__.py \
     && touch /app/infrastructure/resilience/__init__.py
 
+# Copy kafka_utility microservice code
+COPY kafka_utility /app/kafka_utility
+
+# Copy document_service microservice code
+COPY document_service /app/document_service
+
 # Copy application code
-COPY app/ /app/
+COPY llm-service/app/ /app/
+
+# Environment variable for Ollama URL
+ENV OLLAMA_BASE_URL="http://ollama:11434"
+
+# Expose the port the app runs on
+EXPOSE 8002
 
 # Make sure main.py is in the correct location and properly formatted
 RUN if [ -f /app/main.py ]; then \
         echo "main.py exists"; \
     else \
         echo "Creating main.py"; \
-        echo 'from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/")\nasync def root():\n    return {"message": "LLM Service is running"}' > /app/main.py; \
+        echo 'from fastapi import FastAPI\\n\\napp = FastAPI()\\n\\n@app.get("/")\\nasync def root():\\n    return {"message": "LLM Service is running"}' > /app/main.py; \
     fi
 
 # List all files to debug
 RUN find /app -type f | sort
 
-# Expose the port the app will run on
-EXPOSE 8000
-
-# Set Python path to include the current directory
-ENV PYTHONPATH=/app
+# Set Python path to include the parent directory of the 'app' package and /app for kafka_utility
+ENV PYTHONPATH=/:/app
 
 # Command to run the application
-CMD ["python", "-m", "uvicorn", "simple_main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]

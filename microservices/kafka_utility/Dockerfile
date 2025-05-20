@@ -7,6 +7,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
     libc-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -32,4 +33,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD python -c "import socket; socket.socket().connect((os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092').split(':')[0], int(os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092').split(':')[1])))"
 
 # Command to run the service
-CMD ["python", "main.py"]
+CMD ["python", "-m", "app.main"]

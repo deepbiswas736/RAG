@@ -7,7 +7,7 @@ This document provides examples of how to integrate the Kafka Utility Service in
 To use the Kafka Utility client libraries in your microservice, add the following to your `requirements.txt`:
 
 ```
-kafka-utility @ git+https://github.com/your-org/rag-application.git#subdirectory=microservices/kafka-utility
+kafka_utility @ git+https://github.com/your-org/rag-application.git#subdirectory=microservices/kafka_utility
 ```
 
 ## Document Service Integration

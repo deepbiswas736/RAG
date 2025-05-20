@@ -11,15 +11,23 @@ import logging
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime
+import json
 
-from kafka_utility.infrastructure.adapters.kafka_consumer import KafkaConsumerAdapter
-from kafka_utility.clients.document_service import DocumentServiceKafkaClient
-from kafka_utility.clients.llm_service import LLMServiceKafkaClient
-
+# Kafka and utility imports
+from kafka_utility.app.infrastructure.adapters.kafka_consumer import KafkaConsumerAdapter
+from kafka_utility.app.infrastructure.adapters.kafka_producer import KafkaProducerAdapter
+from document_service.app.domain.entities.document import Document
 from ...application.services.llm_service import LLMService
-from ...domain.models.embedding import EmbeddingResponse
+from kafka_utility.app.infrastructure.adapters.consumer_debug import diagnose_kafka_connection, get_consumer_status
+
+# Local application imports
+from kafka_utility.app.clients.document_service import DocumentServiceKafkaClient
+from kafka_utility.app.clients.llm_service import LLMServiceKafkaClient
+from ...domain.models.embedding import Embedding
 
 logger = logging.getLogger(__name__)
+
+MAX_CONCURRENT_TASKS_DEFAULT = 5
 
 class MetadataConsumerService:
     """
@@ -28,37 +36,44 @@ class MetadataConsumerService:
     
     def __init__(
         self,
-        llm_service: LLMService,
-        bootstrap_servers: Optional[str] = None,
-        consumer_group_id: str = "metadata_extraction_group",
-        topic: str = "metadata_extraction",
-        max_concurrent_tasks: int = 5
-    ):
+        consumer_config: Dict[str, Any],
+        document_topic: str, # This is one of the topics the consumer will subscribe to
+        # llm_topic: str, # This seems unused directly by consumer, maybe for producer?
+        producer_config: Dict[str, Any], # Added producer_config
+        llm_service: LLMService, # Added llm_service
+        max_concurrent_tasks: int = MAX_CONCURRENT_TASKS_DEFAULT # Added
+    ): # Corrected signature
         """
-        Initialize the metadata consumer service.
-        
+        Initializes the MetadataConsumerService.
+
         Args:
-            llm_service: Service for LLM operations
-            bootstrap_servers: Kafka bootstrap servers
-            consumer_group_id: Kafka consumer group ID
-            topic: Kafka topic to consume from
-            max_concurrent_tasks: Maximum number of concurrent metadata extraction tasks
+            consumer_config: Configuration for the Kafka consumer.
+            document_topic: The Kafka topic for document metadata.
+            # llm_topic: The Kafka topic for LLM responses.
+            producer_config: Configuration for the Kafka producer.
+            llm_service: Instance of LLMService.
+            max_concurrent_tasks: Maximum concurrent processing tasks.
         """
-        self.llm_service = llm_service
-        self.bootstrap_servers = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-        self.consumer_group_id = consumer_group_id
-        self.topic = topic
-        self.max_concurrent_tasks = max_concurrent_tasks
-        
-        # Initialize Kafka consumer
+        self.consumer_config = consumer_config
+        self.producer_config = producer_config
+        self.document_topic = document_topic # Store for later use
+        self.llm_service = llm_service # Store llm_service instance
+
+        # Initialize KafkaConsumerAdapter directly
         self.consumer = KafkaConsumerAdapter(
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.consumer_group_id
+            bootstrap_servers=self.consumer_config.get('bootstrap.servers'),
+            group_id=self.consumer_config.get('group.id'),
+            auto_offset_reset=self.consumer_config.get('auto.offset.reset', 'earliest')
+            # topics=[self.document_topic] # Removed: Topics are handled by register_handler
         )
-        
-        # Initialize clients
-        self.document_client = DocumentServiceKafkaClient(bootstrap_servers=self.bootstrap_servers)
-        self.llm_client = LLMServiceKafkaClient(bootstrap_servers=self.bootstrap_servers)
+        # Initialize KafkaProducerAdapter
+        self.producer_adapter = KafkaProducerAdapter(
+            bootstrap_servers=self.producer_config.get('bootstrap.servers')
+        )
+        # Pass the producer adapter to the clients
+        self.document_client = DocumentServiceKafkaClient(producer=self.producer_adapter)
+        self.llm_client = LLMServiceKafkaClient(producer=self.producer_adapter) # This client is for sending requests TO llm-service via Kafka, if needed.
+                                                                                # If llm_service is local, direct calls are better.
         
         # Task semaphore for concurrency control
         self.task_semaphore = asyncio.Semaphore(max_concurrent_tasks)
@@ -66,31 +81,83 @@ class MetadataConsumerService:
         # Stats
         self.processed_count = 0
         self.failed_count = 0
-    
+
     async def initialize(self) -> None:
         """Initialize the consumer service."""
-        logger.info(f"Initializing metadata consumer for topic {self.topic}")
+        # Use attributes from consumer_config or consumer object for logging
+        bootstrap_servers = self.consumer_config.get('bootstrap.servers')
+        logger.info(f"Initializing metadata consumer for topic {self.document_topic} with bootstrap servers: {bootstrap_servers}")
         
-        # Initialize clients
-        await self.document_client.initialize()
-        await self.llm_client.initialize()
-        
-        # Register message handler
-        self.consumer.register_handler(self.topic, self._handle_metadata_request)
-        
-        logger.info("Metadata consumer initialized successfully")
-    
+        try:
+            # Initialize clients - DocumentServiceKafkaClient and LLMServiceKafkaClient do not have an initialize method
+            # logger.info("Initializing document client...")
+            # await self.document_client.initialize() # Removed, as client has no initialize
+            # logger.info("Document client initialized successfully")
+            
+            # logger.info("Initializing LLM client...")
+            # await self.llm_client.initialize() # Removed, as client has no initialize
+            # logger.info("LLM client initialized successfully")
+            
+            # Register message handler
+            logger.info(f"Registering handler for topic: {self.document_topic}")
+            self.consumer.register_handler(self.document_topic, self._handle_metadata_request)
+            logger.info(f"Handler registered successfully for topic: {self.document_topic}")
+            
+            logger.info("Metadata consumer initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize metadata consumer: {e}", exc_info=True)
+            raise
+
     async def start(self) -> None:
         """Start consuming metadata extraction requests."""
-        logger.info(f"Starting metadata consumer for topic {self.topic}")
+        logger.info(f"Starting metadata consumer for topic {self.document_topic}")
         
-        # Start consuming messages
-        await self.consumer.start_consuming()
-        
-        # Start background task for periodic stats reporting
-        asyncio.create_task(self._report_stats_periodically())
-        
-        logger.info("Metadata consumer started")
+        try:
+            # Start consuming messages
+            logger.info("Calling consumer.start_consuming()...")
+            await self.consumer.start_consuming()
+            logger.info("Consumer.start_consuming() completed successfully")
+            
+            # Start background task for periodic stats reporting
+            logger.info("Starting periodic stats reporting task...")
+            asyncio.create_task(self._report_stats_periodically()) # Removed assignment to stats_task as it's not used
+            logger.info("Periodic stats reporting task started")
+            
+            # Add connection verification
+            logger.info("Verifying Kafka connection and topic subscription...")
+            # This will log if the consumer is properly connected and subscribed
+            if hasattr(self.consumer, '_consumer') and self.consumer._consumer: # Check internal _consumer attribute
+                # Accessing internal _consumer might be risky if library changes.
+                # Consider adding explicit status methods to KafkaConsumerAdapter.
+                is_connected = False
+                try:
+                    # Try accessing bootstrap_connected via the internal client object
+                    if hasattr(self.consumer._consumer, 'client') and self.consumer._consumer.client:
+                        is_connected = self.consumer._consumer.client.bootstrap_connected()
+                    else:
+                        logger.warning("Consumer's internal KafkaClient not available for bootstrap_connected check.")
+                except AttributeError as e_attr:
+                    logger.warning(f"AttributeError while checking bootstrap_connected status via client: {e_attr}")
+                except Exception as e_conn_check:
+                    logger.warning(f"Could not check bootstrap_connected status via client: {e_conn_check}")
+
+                logger.info(f"Consumer connected (via client check): {is_connected}")
+                # Log assigned partitions as another indicator of health
+                if hasattr(self.consumer._consumer, 'assignment'):
+                    assigned_partitions = self.consumer._consumer.assignment()
+                    logger.info(f"Consumer current assignment: {assigned_partitions}")
+                else:
+                    logger.warning("Could not retrieve consumer assignment.")
+                    
+                logger.info(f"Subscribed topics: {self.consumer._subscribed_topics}") 
+                logger.info(f"Consumer group: {self.consumer.group_id}")
+            else:
+                logger.warning("Consumer internal AIOKafkaConsumer not initialized or accessible via _consumer attribute.")
+            
+            logger.info("Metadata consumer started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start metadata consumer: {e}", exc_info=True)
+            raise
     
     async def stop(self) -> None:
         """Stop consuming messages."""
@@ -106,7 +173,6 @@ class MetadataConsumerService:
         while True:
             logger.info(f"Metadata consumer stats - Processed: {self.processed_count}, Failed: {self.failed_count}")
             await asyncio.sleep(300)  # Report every 5 minutes
-    
     async def _handle_metadata_request(self, message: Dict[str, Any]) -> None:
         """
         Handle a metadata extraction request message.
@@ -116,6 +182,8 @@ class MetadataConsumerService:
         """
         # Extract message data
         try:
+            logger.info(f"Handler received message: {message}")
+            
             payload = message.get("payload", {})
             metadata = message.get("metadata", {})
             
@@ -124,10 +192,10 @@ class MetadataConsumerService:
             file_type = payload.get("fileType")
             priority = payload.get("priority", 5)
             
-            logger.info(f"Received metadata extraction request for document {document_id}")
+            logger.info(f"Received metadata extraction request for document {document_id} with path {document_path}, type {file_type}, priority {priority}")
             
             if not document_id or not document_path:
-                logger.error(f"Invalid metadata request: missing required fields")
+                logger.error(f"Invalid metadata request: missing required fields - document_id: {document_id}, document_path: {document_path}")
                 return
                 
             # Process the request in a separate task with concurrency control
@@ -176,7 +244,7 @@ class MetadataConsumerService:
             metadata = self._parse_metadata_from_llm_output(metadata_text)
             
             # Step 4: Create embeddings for the metadata
-            embedding_response: EmbeddingResponse = await self.llm_service.create_embedding(
+            embedding_response: Embedding = await self.llm_service.create_embedding(
                 text=metadata_text
             )
             
@@ -311,3 +379,59 @@ Document content:
             items = re.findall(r'"([^"]*)"', items_text)
             return items
         return []
+        
+    async def debug_status(self) -> Dict[str, Any]:
+        """
+        Get detailed debug information about the consumer's status.
+        
+        Returns:
+            A dictionary with detailed consumer status information
+        """
+        try:
+            from aiokafka.admin import AIOKafkaAdminClient
+            
+            status = {
+                "initialized": self.consumer is not None,
+                "service_status": {
+                    "bootstrap_servers": self.bootstrap_servers,
+                    "topic": self.topic,
+                    "consumer_group_id": self.consumer_group_id,
+                    "processed_count": self.processed_count,
+                    "failed_count": self.failed_count,
+                },
+            }
+            
+            # Add detailed consumer status
+            consumer_status = get_consumer_status(self.consumer)
+            status["consumer_status"] = consumer_status
+            
+            # Check topic existence
+            try:
+                admin_client = AIOKafkaAdminClient(bootstrap_servers=self.bootstrap_servers)
+                await admin_client.start()
+                topics = await admin_client.list_topics()
+                status["topic_exists"] = self.topic in topics
+                status["available_topics"] = list(topics)
+                await admin_client.close()
+            except Exception as e:
+                logger.error(f"Failed to check topic existence: {e}")
+                status["topic_error"] = str(e)
+            
+            # Test connection to Kafka
+            try:
+                from aiokafka import AIOKafkaProducer
+                producer = AIOKafkaProducer(bootstrap_servers=self.bootstrap_servers)
+                await producer.start()
+                status["kafka_connection"] = "Connected"
+                await producer.stop()
+            except Exception as e:
+                logger.error(f"Failed to connect to Kafka: {e}")
+                status["kafka_connection"] = f"Error: {str(e)}"
+            
+            return status
+        except Exception as e:
+            logger.error(f"Error getting debug status: {e}", exc_info=True)
+            return {
+                "error": str(e),
+                "status": "Error collecting debug information"
+            }

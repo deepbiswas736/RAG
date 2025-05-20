@@ -77,13 +77,13 @@ services:
       - minio_data:/data
     command: server --console-address ":9001" /data
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.3.0
+    image: confluentinc/cp-zookeeper:7.6.1
     ports:
       - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
   kafka:
-    image: confluentinc/cp-kafka:7.3.0
+    image: confluentinc/cp-kafka:7.6.1
     ports:
       - "9092:9092"
     environment:
@@ -120,9 +120,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3  # Kafka Utility Service
-  kafka-utility:
+  kafka_utility:
     build:
-      context: ./microservices/kafka-utility
+      context: ./microservices/kafka_utility
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_SECURITY_PROTOCOL=PLAINTEXT
@@ -134,7 +134,7 @@ services:
   # Document Service
   document-service:
     build: 
-      context: ./microservices/document-service
+      context: ./microservices/document_service # Changed from document-service
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.document-service.rule=PathPrefix(`/api/documents`)"
@@ -162,17 +162,22 @@ services:
   # LLM Service with Metadata Extraction
   llm-service:
     build: 
-      context: ./microservices/llm-service
+       context: ./microservices # Correct context
+       dockerfile: llm-service/Dockerfile # Path to Dockerfile within the context
+    ports:
+      - "8002:8002"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.llm-service.rule=PathPrefix(`/api/llm`)"
-      - "traefik.http.services.llm-service.loadbalancer.server.port=8000"
+      - "traefik.http.services.llm-service.loadbalancer.server.port=8002" # Changed to 8002
       - "traefik.http.middlewares.llm-service-stripprefix.stripprefix.prefixes=/api/llm"
       - "traefik.http.routers.llm-service.middlewares=llm-service-stripprefix"
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - MAX_CONCURRENT_METADATA_TASKS=5
       - OLLAMA_API_URL=http://ollama:11434
+      - IN_DOCKER=true
+      - LOG_LEVEL=DEBUG
     depends_on:
       - kafka
       - ollama
