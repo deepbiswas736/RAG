@@ -1,0 +1,32 @@
+Troubleshooting OpenTelemetry Issues Log:
+
+Initial Status (2025-05-21):
+- OpenTelemetry dependencies installed via requirements.txt for all relevant services.
+- Persistent import errors for opentelemetry packages (e.g., opentelemetry.exporter.otlp.proto.grpc.log_exporter) in multiple services.
+- kafka_utility import error in llm-service.
+
+Next Steps:
+1. Investigate kafka_utility import error in llm-service.
+2. Investigate OpenTelemetry import errors.
+
+[2025-05-21 Session Start]
+Attempting to resolve import errors for OpenTelemetry and kafka_utility.
+Initial focus: e:\code\experimental\RAG\microservices\llm-service\app\main.py
+
+Plan:
+1. Investigate kafka_utility import: Check for and create missing __init__.py files.
+2. Re-check errors in llm-service.
+3. Systematically address OpenTelemetry import errors if they persist.
+
+[2025-05-21 10:00]
+Modified e:\code\experimental\RAG\microservices\llm-service\app\main.py:
+- Removed sys.path manipulation for kafka_utility import.
+- Relied on standard import for kafka_utility.app.infrastructure.adapters.consumer_debug.
+- OpenTelemetry import errors (e.g., opentelemetry.exporter.otlp.proto.grpc.log_exporter) still persist after this change.
+
+Next steps:
+- Further investigate Python environment for llm-service if OTEL errors continue.
+
+[Persistent Issue] OpenTelemetry import errors ("Import ... could not be resolved") continue in all main.py files even after confirming successful pip installation of dependencies.
+Hypothesis: The Python interpreter/environment used by the linter/editor might not be correctly recognizing the newly installed packages, or the linter needs a restart/refresh.
+Next Steps: Will advise user to check interpreter settings in VS Code and potentially restart the Python Language Server or VS Code.

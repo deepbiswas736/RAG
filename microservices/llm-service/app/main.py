@@ -14,15 +14,6 @@ from pydantic import BaseModel, Field
 import uvicorn
 import json
 import socket
-import sys
-
-# Add the microservices directory to sys.path
-# __file__ is e:\code\experimental\RAG\microservices\llm-service\app\main.py
-# os.path.dirname(__file__) is e:\code\experimental\RAG\microservices\llm-service\app
-# os.path.join(os.path.dirname(__file__), '..', '..') should be e:\code\experimental\RAG\microservices
-microservices_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if microservices_root not in sys.path:
-    sys.path.insert(0, microservices_root)
 
 # Import application service
 from .application.services.llm_service import LLMService
@@ -32,19 +23,8 @@ from .infrastructure.llm.ollama_adapter import OllamaTextGeneration, OllamaEmbed
 from .infrastructure.messaging.metadata_consumer import MetadataConsumerService
 
 # Import Kafka debug helpers
-try:
-    from kafka_utility.app.infrastructure.adapters.consumer_debug import diagnose_kafka_connection, get_consumer_status
-except ImportError:
-    try:
-        # Try direct import path
-        from kafka_utility.infrastructure.adapters.consumer_debug import diagnose_kafka_connection, get_consumer_status
-    except ImportError:
-        # Define stub functions if not available
-        async def diagnose_kafka_connection(bootstrap_servers, topic):
-            return {"status": "error", "error": "Kafka diagnosis not available"}
-        
-        def get_consumer_status(consumer):
-            return {"status": "unknown", "error": "Consumer status check not available"}
+# Try to import directly, assuming kafka_utility is in PYTHONPATH or discoverable
+from kafka_utility.app.infrastructure.adapters.consumer_debug import diagnose_kafka_connection, get_consumer_status
 
 # Configure logging
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -52,39 +32,59 @@ log_level = getattr(logging, log_level_str, logging.INFO)
 logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configure OpenTelemetry Logging
-log_level_str = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
-log_level = getattr(logging, log_level_str, logging.INFO)
-
+# Configure OpenTelemetry
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
-from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
-logger_provider = LoggerProvider(
-    resource=Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME", "llm-service")})
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor # Changed OpenTelemetryInstrumentor to FastAPIInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+# For Kafka, ensure you have opentelemetry-instrumentation-kafka-python installed
+from opentelemetry.instrumentation.kafka import KafkaInstrumentor
+
+
+# Configure OpenTelemetry Logging
+otel_log_level_str = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
+otel_log_level = getattr(logging, otel_log_level_str, logging.INFO)
+
+resource = Resource.create({
+    "service.name": os.environ.get("OTEL_SERVICE_NAME", "llm-service")
+})
+
+# Logs
+logger_provider = LoggerProvider(resource=resource)
+otlp_log_exporter = OTLPLogExporter(
+    endpoint=os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4318/v1/logs") # Removed insecure=True
 )
-otlp_log_exporter = OTLPLogExporter(endpoint=os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4317"), insecure=True)
 logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
-logging.getLogger().addHandler(LoggingHandler(level=log_level, logger_provider=logger_provider))
-logging.getLogger().setLevel(log_level)
+logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
+# Ensure the root logger's level is also appropriate if not already set
+if logging.getLogger().level > otel_log_level:
+    logging.getLogger().setLevel(otel_log_level)
 
-# Configure OpenTelemetry Tracing (if not already configured)
-# Assuming traces might also be useful, setting up a basic trace provider.
-# If you have specific tracing setup elsewhere, this might need adjustment.
-if not trace.get_tracer_provider().__class__.__name__ == 'ProxyTracerProvider': # Check if a global tracer provider is already set
-    resource = Resource(attributes={
-        "service.name": os.environ.get("OTEL_SERVICE_NAME", "llm-service")
-    })
+
+# Traces
+# Check if a global tracer provider is already set by another instrumentation
+if not isinstance(trace.get_tracer_provider(), TracerProvider):
     provider = TracerProvider(resource=resource)
-    otlp_trace_exporter = OTLPSpanExporter(endpoint=os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector:4317"), insecure=True)
+    otlp_trace_exporter = OTLPSpanExporter(
+        endpoint=os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector:4318/v1/traces") # Removed insecure=True
+    )
     processor = BatchSpanProcessor(otlp_trace_exporter)
     provider.add_span_processor(processor)
     trace.set_tracer_provider(provider)
+else:
+    # If a provider is already set (e.g. by auto-instrumentation), try to add processor to it
+    # This part is more complex as the global provider might not be configurable directly
+    # For now, we assume if it's set, it's managed elsewhere or by auto-instrumentation
+    logger.info("Global TracerProvider already set. Assuming it's correctly configured.")
+
 
 # Define service name and version
 SERVICE_NAME = "LLMService"
@@ -123,6 +123,21 @@ app = FastAPI(
     version=SERVICE_VERSION,
     docs_url="/docs"
 )
+
+# Instrument FastAPI app
+FastAPIInstrumentor().instrument_app(app) # Changed OpenTelemetryInstrumentor to FastAPIInstrumentor
+
+# Instrument Logging
+LoggingInstrumentor().instrument(set_logging_format=True)
+
+# Instrument Requests
+RequestsInstrumentor().instrument()
+
+# Instrument Kafka
+# This will instrument confluent_kafka producers and consumers
+# Ensure 'opentelemetry-instrumentation-kafka-python' is in requirements.txt
+KafkaInstrumentor().instrument()
+
 
 # Initialize metadata consumer
 # Define Kafka configurations

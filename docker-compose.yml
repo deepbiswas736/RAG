@@ -163,11 +163,11 @@ services:
        context: ./microservices # Correct context
        dockerfile: llm-service/Dockerfile # Path to Dockerfile within the context
     ports:
-      - "8002:8002"
+      - "8001:8002" # Host port 8001 mapped to container port 8002
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.llm-service.rule=PathPrefix(`/api/llm`)"
-      - "traefik.http.services.llm-service.loadbalancer.server.port=8002" # Changed to 8002
+      - "traefik.http.services.llm-service.loadbalancer.server.port=8002" # Corrected: Traefik targets container port
       - "traefik.http.middlewares.llm-service-stripprefix.stripprefix.prefixes=/api/llm"
       - "traefik.http.routers.llm-service.middlewares=llm-service-stripprefix"
     environment:
@@ -177,12 +177,16 @@ services:
       - IN_DOCKER=true
       - LOG_LEVEL=DEBUG
       - OTEL_SERVICE_NAME=llm-service
-      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector:4317
-      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector:4318/v1/logs
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
       - OTEL_PYTHON_LOG_LEVEL=INFO
     depends_on:
       - kafka
       - ollama
+      - otel-collector # Add dependency on otel-collector
+    networks: # Add network configuration
+      - default
+      - rag_observability
 
 # Removed duplicate query service definition
   document-processor:
@@ -190,7 +194,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.docproc.rule=PathPrefix(`/api/document-processor`)"
-      - "traefik.http.services.docproc.loadbalancer.server.port=8080"
+      - "traefik.http.services.docproc.loadbalancer.server.port=8081" # Changed port
       - "traefik.http.middlewares.docproc-stripprefix.stripprefix.prefixes=/api/document-processor"
       - "traefik.http.routers.docproc.middlewares=docproc-stripprefix"
     volumes:
@@ -198,11 +202,7 @@ services:
     depends_on:
       - traefik
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"] # Changed port
   # Query Service needs to be fixed
   query-service:
     build: 
@@ -210,20 +210,20 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.query-service.rule=PathPrefix(`/api/query`)"
-      - "traefik.http.services.query-service.loadbalancer.server.port=8000"
+      - "traefik.http.services.query-service.loadbalancer.server.port=8003" # Changed port
       - "traefik.http.middlewares.query-service-stripprefix.stripprefix.prefixes=/api/query"
       - "traefik.http.routers.query-service.middlewares=query-service-stripprefix"
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - MONGO_URI=mongodb://user:password@mongodb:27017/rag_db?authSource=admin&replicaSet=rs0&retryWrites=true
-      - LLM_SERVICE_URL=http://llm-service:8000
+      - LLM_SERVICE_URL=http://llm-service:8002 
     depends_on:
       - kafka
       - mongodb
       - llm-service
       - tesseract
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003"] # Changed port
       interval: 30s
       timeout: 10s
       retries: 3
@@ -265,3 +265,10 @@ volumes:
   ollama_data:
   ocr_processing:
   fallback_storage:
+
+networks:
+  default: # Define the default network if other services rely on it implicitly
+    driver: bridge
+  rag_observability:
+    external: true
+    name: rag_observability

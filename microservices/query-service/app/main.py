@@ -17,6 +17,25 @@ import asyncio
 import uvicorn
 import uuid
 
+# Configure OpenTelemetry Logging
+OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "query-service")
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4317")
+OTEL_PYTHON_LOG_LEVEL_STR = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
+otel_log_level = getattr(logging, OTEL_PYTHON_LOG_LEVEL_STR, logging.INFO)
+
+from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
+from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.resources import Resource
+
+logger_provider = LoggerProvider(
+    resource=Resource.create({"service.name": OTEL_SERVICE_NAME})
+)
+otlp_log_exporter = OTLPLogExporter(endpoint=OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, insecure=True)
+logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
+logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
+# logging.getLogger().setLevel(otel_log_level)
+
 # Use absolute imports instead of relative imports
 import config
 from application.services.query_processor import QueryProcessor

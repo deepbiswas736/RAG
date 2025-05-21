@@ -29,5 +29,8 @@ kafka-python>=2.0.2
 # OpenTelemetry dependencies
 opentelemetry-api
 opentelemetry-sdk
-opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp # Provides both gRPC and HTTP exporters
+opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-logging
+opentelemetry-instrumentation-requests
+opentelemetry-instrumentation-kafka-python # For Kafka

@@ -28,7 +28,7 @@ RUN mkdir -p /output
 ENV OUTPUT_DIR=/output
 
 # Expose the port
-EXPOSE 8080
+EXPOSE 8081
 
 # Run the application
 CMD ["./document-processor"]

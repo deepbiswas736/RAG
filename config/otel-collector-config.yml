@@ -54,7 +54,7 @@ exporters:
 
   elasticsearch/logs: # New exporter for logs
     endpoints: ["http://elasticsearch:9200"]
-    index: "logs-rag-%{YYYY.MM.DD}" # Specific index for RAG logs
+    index: "logs-rag-%{yyyy.mm.dd}" # Changed YYYY.MM.DD to yyyy.mm.dd
 
   prometheus:
     endpoint: "0.0.0.0:8889"
