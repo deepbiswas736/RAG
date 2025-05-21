@@ -1,27 +1,51 @@
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-exporter-otlp
-opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-logging
-opentelemetry-instrumentation-requests
-opentelemetry-instrumentation-kafka-python
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-requests
-kafka-python
-azure-core
-azure-ai-textanalytics
-azure-ai-openai
-promptflow
-promptflow-tools
-langchain
-langchain-community
-langchain-openai
-langchain_experimental
-llama-index
-llama-index-vector-stores-azureaisearch
-llama-index-embeddings-azure-openai
-llama-index-llms-azure-openai
-python-json-logger
+# Core dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+pydantic>=2.4.0
+requests>=2.31.0
+
+# Database
+motor>=3.3.1
+pymongo>=4.6.0
+
+# Messaging
+kafka-python>=2.0.2
+
+# Machine Learning & NLP
+numpy>=1.24.0
+scipy>=1.7.3
+tiktoken>=0.3.3
+
+# Azure AI
+azure-core>=1.29.5
+azure-ai-textanalytics>=5.3.0
+azure-ai-openai>=1.0.0
+
+# LLM & RAG frameworks
+promptflow>=1.0.0
+promptflow-tools>=1.0.0
+langchain>=0.0.340
+langchain-community>=0.0.10
+langchain-openai>=0.0.5
+langchain_experimental>=0.0.38
+llama-index>=0.9.0
+llama-index-vector-stores-azureaisearch>=0.1.5
+llama-index-embeddings-azure-openai>=0.1.5
+llama-index-llms-azure-openai>=0.1.5
+
+# Observability
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-exporter-otlp>=1.20.0
+opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-instrumentation-logging>=0.41b0
+opentelemetry-instrumentation-requests>=0.41b0
+opentelemetry-instrumentation-kafka-python>=0.41b0
+python-json-logger>=2.0.7
+
+# Utilities
+httpx>=0.25.0
+jinja2>=3.1.2
+asyncio>=3.4.3
+python-multipart>=0.0.5
