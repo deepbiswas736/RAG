@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install dependencies
 COPY llm-service/app/requirements.txt ./llm-requirements.txt
-COPY kafka_utility/requirements.txt ./kafka-utility-requirements.txt
+COPY kafka_utility/requirements.txt ./kafka_utility_requirements.txt
 RUN pip install uv && \
-    uv pip install --system --no-cache-dir -r llm-requirements.txt -r kafka-utility-requirements.txt uvicorn \
+    uv pip install --system --no-cache-dir -r llm-requirements.txt -r kafka_utility_requirements.txt uvicorn \
         opentelemetry-api \
         opentelemetry-sdk \
         opentelemetry-exporter-otlp \
