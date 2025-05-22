@@ -34,11 +34,10 @@ processors:
 
 exporters:
   logging:
-    verbosity: detailed
-
+    loglevel: debug
   elasticsearch/trace:
     endpoints: ["http://elasticsearch:9200"]
-    index: "traces-%{YYYY.MM.DD}"
+    index: "traces"
     # Enable TLS and auth in production
     # tls:
     #   ca_file: /path/to/ca.crt
@@ -50,11 +49,10 @@ exporters:
 
   elasticsearch/metrics:
     endpoints: ["http://elasticsearch:9200"]
-    index: "metrics-%{YYYY.MM.DD}"
-
+    index: "metrics"
   elasticsearch/logs: # New exporter for logs
     endpoints: ["http://elasticsearch:9200"]
-    index: "logs-rag-%{yyyy.mm.dd}" # Changed YYYY.MM.DD to yyyy.mm.dd
+    index: "logs-rag"
 
   prometheus:
     endpoint: "0.0.0.0:8889"
@@ -73,12 +71,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, probabilistic_sampler, batch, resource]
-      exporters: [elasticsearch/trace, logging]
+      exporters: [elasticsearch/trace, logging] # Replaced debug with logging
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, logging] # Replaced debug with logging
     logs: # New pipeline for logs
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [elasticsearch/logs, logging]
+      exporters: [elasticsearch/logs, logging] # Replaced debug with logging

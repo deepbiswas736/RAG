@@ -14,7 +14,10 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements file
 COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt uvicorn \
+    opentelemetry-distro[otlp] \
+    opentelemetry-instrumentation-logging \
+    opentelemetry-instrumentation-fastapi
 
 # Copy application code
 COPY app/ .

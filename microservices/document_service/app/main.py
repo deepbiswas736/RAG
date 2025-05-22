@@ -9,21 +9,22 @@ This microservice handles document operations:
 """
 
 from fastapi import FastAPI, UploadFile, BackgroundTasks, Form, HTTPException, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional, Union, Any
-import asyncio
-import io
+from typing import List, Dict, Optional, Any
 import os
-import sys
 import logging
 import uvicorn
 import socket
-from bson import ObjectId
-from bson.errors import InvalidId
-import uuid
 import json
-from pathlib import Path
+
+# OpenTelemetry Imports
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter # Changed from http to grpc
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,15 +36,10 @@ OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPO
 OTEL_PYTHON_LOG_LEVEL_STR = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
 otel_log_level = getattr(logging, OTEL_PYTHON_LOG_LEVEL_STR, logging.INFO)
 
-from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
-from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
-
 logger_provider = LoggerProvider(
     resource=Resource.create({"service.name": OTEL_SERVICE_NAME})
 )
-otlp_log_exporter = OTLPLogExporter(endpoint=OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, insecure=True)
+otlp_log_exporter = OTLPLogExporter(endpoint=OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
 logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
 # logging.getLogger().setLevel(otel_log_level)
@@ -153,6 +149,10 @@ document_management_service = DocumentManagementService(
 document_service = DocumentService(
     document_management_service=document_management_service
 )
+
+# Instrument FastAPI app
+FastAPIInstrumentor.instrument_app(app)
+LoggingInstrumentor().instrument(level=otel_log_level)
 
 # Root endpoint
 @app.get("/")

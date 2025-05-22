@@ -148,6 +148,11 @@ services:
       - MINIO_SECRET_KEY=minioadmin
       - OCR_LANGUAGE=eng
       - PDF_DPI=300
+      - OTEL_SERVICE_NAME=document-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_LOGS_EXPORTER=otlp
+      - OTEL_PYTHON_LOG_LEVEL=INFO
     volumes:
       - ./data/document_storage:/app/data/storage
       - ./data/pdf_processing:/app/data/pdf_processing
@@ -157,6 +162,9 @@ services:
       - mongodb
       - document-processor
       - minio
+    networks: # Add network configuration
+      - default
+      - rag_observability
   # LLM Service with Metadata Extraction
   llm-service:
     build: 
@@ -175,10 +183,10 @@ services:
       - MAX_CONCURRENT_METADATA_TASKS=5
       - OLLAMA_API_URL=http://ollama:11434
       - IN_DOCKER=true
-      - LOG_LEVEL=DEBUG
+      - LOG_LEVEL=INFO # Changed from DEBUG to INFO
       - OTEL_SERVICE_NAME=llm-service
-      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector:4318/v1/logs
-      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317 # Removed http://
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - OTEL_PYTHON_LOG_LEVEL=INFO
     depends_on:
       - kafka
@@ -239,24 +247,127 @@ services:
     depends_on:
       - kafka
       
-  # UI for the application
-  ui:
-    build:
-      context: ./ui
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ui.rule=PathPrefix(`/`)"
-      - "traefik.http.services.ui.loadbalancer.server.port=3000"
+  # OpenTelemetry Collector for observability
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.85.0
+    volumes:
+      - ./config/otel-collector-config.yml:/etc/otel-collector-config.yml
+    command: ["--config=/etc/otel-collector-config.yml"]
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=/api
-      - NEXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
-      - NEXT_PUBLIC_QUERY_SERVICE_URL=/api/query
-      - NEXT_PUBLIC_LLM_SERVICE_URL=/api/llm
+      - DEPLOYMENT_REGION=local
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+      - "8888:8888"  # Prometheus metrics exposed by the collector
+      - "8889:8889"  # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
     depends_on:
-      - traefik
-      - document-service
-      - query-service
-      - llm-service
+      elasticsearch:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    networks:
+      - default
+      - rag_observability
+      
+  # Elasticsearch for observability data storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=docker-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+      - ELASTIC_APM_SECRET_TOKEN=${ELASTIC_APM_TOKEN:-""}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - default
+      - rag_observability
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      
+  # Kibana for Elasticsearch visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.9.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTIC_APM_SERVER_URL=http://apm-server:8200
+      - ELASTIC_APM_SERVICE_NAME=kibana
+      - ELASTIC_APM_SECRET_TOKEN=${ELASTIC_APM_TOKEN:-""}
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - default
+      - rag_observability
+      
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    ports:
+      - "16686:16686"  # Web UI
+      - "14250:14250"  # OTLP gRPC
+      - "14268:14268"  # jaeger.thrift via HTTP
+      - "14269:14269"  # Admin port
+      - "9411:9411"   # Zipkin port
+    networks:
+      - default
+      - rag_observability
+      
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - default
+      - rag_observability
+    extra_hosts: # Added for Docker Desktop compatibility
+      - "host.docker.internal:host-gateway"
+      
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:10.0.3
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - default
+      - rag_observability
 
 volumes:
   mongo_app_data: # Changed volume name here
@@ -265,10 +376,14 @@ volumes:
   ollama_data:
   ocr_processing:
   fallback_storage:
+  elasticsearch-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
-  default: # Define the default network if other services rely on it implicitly
+  default:
     driver: bridge
   rag_observability:
-    external: true
+    # external: true # Removed to make the compose file self-contained
     name: rag_observability
+    driver: bridge

@@ -190,13 +190,13 @@ class MetadataConsumerService:
         try:
             logger.info(f"Handler received message: {message}")
             
-            payload = message.get("payload", {})
-            metadata = message.get("metadata", {})
-            
-            document_id = payload.get("documentId")
-            document_path = payload.get("documentPath")
-            file_type = payload.get("fileType")
-            priority = payload.get("priority", 5)
+            # Directly extract fields from the message object
+            document_id = message.get("documentId")
+            document_path = message.get("documentPath")
+            file_type = message.get("fileType")
+            # Assuming 'status' might also be relevant from the message, though not used directly in the next log line
+            # status = message.get("status") 
+            priority = message.get("priority", 5) # Default priority if not in message
             
             logger.info(f"Received metadata extraction request for document {document_id} with path {document_path}, type {file_type}, priority {priority}")
             
@@ -236,7 +236,7 @@ class MetadataConsumerService:
             # Step 1: Retrieve document and its chunks
             # Assuming document_client has methods to fetch these from MongoDB
             # You might need to implement these in DocumentServiceKafkaClient or a direct MongoDB client
-            document_data = await self.document_client.get_document_by_id(document_id) # Placeholder
+            document_data = await self.mongo_client.get_document_by_id(document_id) # Placeholder
             if not document_data:
                 logger.error(f"Document {document_id} not found.")
                 self.failed_count += 1
@@ -252,13 +252,13 @@ class MetadataConsumerService:
                 )
                 return
 
-            document_chunks = await self.document_client.get_document_chunks(document_id) # Placeholder
+            document_chunks = await self.mongo_client.get_document_chunks(document_id) # Placeholder
             if not document_chunks:
                 logger.warning(f"No chunks found for document {document_id}. Proceeding with document-level metadata.")
             
             # Simulate document content for overall analysis (replace with actual content retrieval if needed)
             # This could come from document_data or a specific field within it.
-            document_content_for_summary = document_data.get("full_text_content", "") # Example field
+            document_content_for_summary = document_data.get("text_content", "") # Example field
             if not document_content_for_summary and document_chunks: # Fallback to concatenating chunk content
                 document_content_for_summary = " ".join([chunk.get("content", "") for chunk in document_chunks])
 

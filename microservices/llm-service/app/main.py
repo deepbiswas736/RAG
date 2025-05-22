@@ -37,8 +37,8 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter # Changed from http to grpc
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter # Changed from http to grpc
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
@@ -60,7 +60,7 @@ resource = Resource.create({
 # Logs
 logger_provider = LoggerProvider(resource=resource)
 otlp_log_exporter = OTLPLogExporter(
-    endpoint=os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4318/v1/logs") # Removed insecure=True
+    endpoint=os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4317"))
 )
 logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
 logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
@@ -74,7 +74,7 @@ if logging.getLogger().level > otel_log_level:
 if not isinstance(trace.get_tracer_provider(), TracerProvider):
     provider = TracerProvider(resource=resource)
     otlp_trace_exporter = OTLPSpanExporter(
-        endpoint=os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://otel-collector:4318/v1/traces") # Removed insecure=True
+        endpoint=os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4317"))
     )
     processor = BatchSpanProcessor(otlp_trace_exporter)
     provider.add_span_processor(processor)
