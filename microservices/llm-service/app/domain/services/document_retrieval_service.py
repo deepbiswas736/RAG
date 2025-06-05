@@ -34,16 +34,6 @@ class DocumentRetrievalService:
         Returns:
             Document data or None if not found
         """
-        # Try getting document from Document Service first
-        try:
-            document = await self.document_client.get_document_by_id(document_id)
-            if document:
-                logger.info(f"Retrieved document {document_id} from Document Service")
-                return document
-        except Exception as e:
-            logger.warning(f"Error retrieving document {document_id} from Document Service: {e}")
-        
-        # Fall back to MongoDB if Document Service failed or returned None
         try:
             document = await self.mongo_client.get_document_by_id(document_id)
             if document:
@@ -67,16 +57,7 @@ class DocumentRetrievalService:
         Returns:
             List of document chunks
         """
-        # Try getting chunks from Document Service first
-        try:
-            chunks = await self.document_client.get_document_chunks(document_id, limit)
-            if chunks:
-                logger.info(f"Retrieved {len(chunks)} chunks for document {document_id} from Document Service")
-                return chunks
-        except Exception as e:
-            logger.warning(f"Error retrieving chunks for document {document_id} from Document Service: {e}")
-        
-        # Fall back to MongoDB if Document Service failed or returned empty list
+
         try:
             chunks = await self.mongo_client.get_document_chunks(document_id, limit)
             if chunks:
@@ -101,7 +82,7 @@ class DocumentRetrievalService:
             Document content string
         """
         # Try to get content directly from document
-        content = document_data.get("content", "") or document_data.get("full_text_content", "")
+        content = document_data.get("content", "") or document_data.get("text_content", "")
         
         # If no content in document, try concatenating chunk contents
         if not content and chunks:

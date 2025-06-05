@@ -4,6 +4,7 @@ import io
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, BinaryIO
+from datetime import datetime
 
 from fastapi import HTTPException, UploadFile # Added UploadFile and HTTPException
 from opentelemetry import trace
@@ -240,20 +241,39 @@ class DocumentManagementService:
             
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception as e:            
             logger.error(f"Error getting chunks data for document {document_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Error retrieving document chunks data: {str(e)}")
-
+            
     def _document_to_dto_internal(self, document: Document) -> DocumentDTO: 
         """Converts a document domain model to its DTO representation."""
+        # Handle created_at - could be datetime or float (Unix timestamp)
+        if isinstance(document.created_at, datetime):
+            created_at = document.created_at
+        elif isinstance(document.created_at, (int, float)):
+            # Convert Unix timestamp to datetime
+            created_at = datetime.fromtimestamp(document.created_at)
+        else:
+            # Use current time as fallback
+            created_at = datetime.now()
+          # Handle updated_at - could be datetime or float (Unix timestamp)
+        if isinstance(document.updated_at, datetime):
+            updated_at = document.updated_at
+        elif isinstance(document.updated_at, (int, float)):
+            # Convert Unix timestamp to datetime
+            updated_at = datetime.fromtimestamp(document.updated_at)
+        else:
+            # Use current time as fallback
+            updated_at = datetime.now()
+            
         return DocumentDTO( 
             id=document.id,
             name=document.name,
             file_type=document.file_type,
             file_size=document.file_size,
             content_type=document.content_type,
-            created_at=document.created_at.isoformat(), # Assumes datetime object
-            updated_at=document.updated_at.isoformat(), # Assumes datetime object
+            created_at=created_at,
+            updated_at=updated_at,
             is_processed=document.is_processed,
             is_chunked=document.is_chunked,
             processing_status=document.processing_status,

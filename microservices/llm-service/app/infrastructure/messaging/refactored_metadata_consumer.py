@@ -170,7 +170,7 @@ class MetadataConsumerService:
             
         except Exception as e:
             logger.warning(f"Error checking Kafka connection: {e}")
-    
+            
     async def _report_stats_periodically(self) -> None:
         """Report consumer stats periodically."""
         while True:
@@ -187,18 +187,24 @@ class MetadataConsumerService:
         try:
             logger.info(f"Handler received message: {message}")
             
-            payload = message.get("payload", {})
-            metadata = message.get("metadata", {})
+            # Handle both direct message and payload structure
+            if "payload" in message:
+                payload = message.get("payload", {})
+                metadata = message.get("metadata", {})
+            else:
+                payload = message
+                metadata = {}
             
-            document_id = payload.get("documentId")
-            document_path = payload.get("documentPath")
-            file_type = payload.get("fileType")
+            # Support both camelCase (from API) and snake_case naming
+            document_id = payload.get("documentId") or payload.get("document_id")
+            document_path = payload.get("documentPath") or payload.get("document_path")
+            file_type = payload.get("fileType") or payload.get("file_type")
             priority = payload.get("priority", 5)
             
             logger.info(f"Received metadata extraction request for document {document_id}")
             
             if not document_id:
-                logger.error("Invalid metadata request: missing document_id")
+                logger.error("Invalid metadata request: missing documentId/document_id")
                 return
                 
             # Process the request with concurrency control

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 
 export interface Document {
   id: string;
-  title: string;
+  name: string;
   file?: string;
   metadata?: Record<string, unknown>;
 }
@@ -18,7 +18,10 @@ export function useDocuments() {
     try {
       const res = await fetch("/api/documents");
       if (res.ok) {
-        setDocuments(await res.json());
+
+        const docs = await res.json();
+        console.log(docs)
+        setDocuments(docs.documents);
       } else {
         console.error("Failed to fetch documents");
       }
@@ -42,7 +45,7 @@ export function useDocuments() {
     formData.append("file", file);
     setUploadStatus("Uploading...");
     try {
-      const res = await fetch("/api/upload", {
+      const res = await fetch("/api/documents", {
         method: "POST",
         body: formData,
       });

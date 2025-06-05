@@ -10,6 +10,7 @@ import asyncio
 from typing import Dict, Any, Optional, List
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import OperationFailure, ServerSelectionTimeoutError, ConnectionFailure
+from bson import ObjectId
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,42 +18,50 @@ logger = logging.getLogger(__name__)
 class MongoDBClient:
     """MongoDB client utility for LLM service"""
     
-    def __init__(self):
+    def __init__(self, connection_string: Optional[str] = None, db_name: Optional[str] = None):
         """Initialize the MongoDB client"""
-        # Use environment variables with fallbacks for connection settings
-        self.mongodb_url = os.getenv('MONGODB_URL', 'mongodb://user:password@mongodb:27017/?authSource=admin&directConnection=true')
-        self.db_name = os.getenv('MONGODB_DB_NAME', 'llm_service_db')
+        # Prioritize MONGO_URI, then MONGODB_URL, then the default
+        self.connection_string = os.getenv("MONGO_URI") or \
+                                 os.getenv("MONGODB_URL") or \
+                                 connection_string or \
+                                 "mongodb://user:password@mongodb:27017/?authSource=admin&replicaSet=rs0&retryWrites=true"
+        
+        self.db_name = db_name or os.getenv("MONGODB_DB_NAME", "rag_db")
+        logger.info(f"Attempting to connect to MongoDB with connection string: {self.connection_string}")
         
         self.client = None
         self.db = None
-        
         # Collection references
         self.documents = None
         self.chunks = None
-        self.metadata = None
-        self.topics = None
         
-        logger.info(f"MongoDB client initialized with URL: {self.mongodb_url}, DB: {self.db_name}")
-
+        logger.info(f"MongoDB client initialized with database: {self.db_name}")
+        
     async def initialize(self) -> None:
         """Initialize MongoDB connection and collections"""
+        # Connect to MongoDB with replica set awareness and improved connection parameters
+        connect_kwargs = {
+            "serverSelectionTimeoutMS": 5000,  # 5 seconds timeout for server selection
+            "connectTimeoutMS": 10000,         # 10 seconds connection timeout
+            "socketTimeoutMS": 30000,          # 30 seconds socket timeout
+            "retryWrites": True,               # Enable retry for write operations
+        }
+        
         # Retry connection 5 times with increasing timeout
         max_retries = 5
         retry_delay = 2  # seconds
         for attempt in range(max_retries):
             try:
-                self.client = AsyncIOMotorClient(self.mongodb_url, serverSelectionTimeoutMS=10000)
+                self.client = AsyncIOMotorClient(self.connection_string, **connect_kwargs)
                 # Check connection is working
-                await self.client.admin.command('ismaster')
+                await self.client.admin.command('ping')
                 self.db = self.client[self.db_name]
                 
                 # Initialize collections
                 self.documents = self.db.documents
                 self.chunks = self.db.document_chunks
-                self.metadata = self.db.document_metadata
-                self.topics = self.db.document_topics
                 
-                logger.info("Successfully connected to MongoDB")
+                logger.info(f"Successfully connected to MongoDB database: {self.db_name}")
                 await self._ensure_indexes()
                 return
             except (ServerSelectionTimeoutError, ConnectionFailure) as e:
@@ -61,28 +70,24 @@ class MongoDBClient:
                 retry_delay *= 2  # Exponential backoff
             except Exception as e:
                 logger.error(f"Unexpected error during MongoDB initialization: {e}")
-                raise
-
-        logger.error("Failed to connect to MongoDB after multiple retries")
+                raise        logger.error("Failed to connect to MongoDB after multiple retries")
         raise ConnectionError("Failed to connect to MongoDB after multiple retries")
-
+        
     async def _ensure_indexes(self) -> None:
         """Create necessary indexes for MongoDB collections"""
         try:
             # Document collection indexes
             await self.documents.create_index("document_id", unique=True, sparse=True)
-            
-            # Document chunks collection indexes
+            await self.documents.create_index("metadata.topics")  # Add index for topics in metadata
+              # Document chunks collection indexes
             await self.chunks.create_index("document_id")
-            await self.chunks.create_index("chunk_id", unique=True, sparse=True)
-            
-            # Topics collection indexes
-            await self.topics.create_index([("document_id", 1), ("chunk_id", 1)])
+            await self.chunks.create_index("id", unique=True, sparse=True)  # UUID string identifier
+            await self.chunks.create_index("metadata.topics")  # Add index for topics in metadata
             
             logger.info("MongoDB indexes created successfully")
         except Exception as e:
-            logger.error(f"Error creating MongoDB indexes: {e}")
-
+            logger.error(f"Error creating MongoDB indexes: {e}")    
+            
     async def get_document_by_id(self, document_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve a document by its ID
@@ -92,13 +97,21 @@ class MongoDBClient:
             
         Returns:
             Document data as dictionary or None if not found
-        """
+        """        
         try:
-            if not self.documents:
+            if self.documents is None:
                 logger.error("MongoDB client not initialized")
                 return None
-                
-            document = await self.documents.find_one({"document_id": document_id})
+
+            # Convert string ID to ObjectId if valid format
+            doc_id = document_id
+            if ObjectId.is_valid(document_id):
+                doc_id = ObjectId(document_id)
+
+            # Try to find by both ObjectId and string ID
+            query = {"$or": [{"_id": doc_id}, {"document_id": document_id}]}
+            document = await self.documents.find_one(query)
+            
             if document:
                 logger.info(f"Retrieved document {document_id} from MongoDB")
                 return document
@@ -119,9 +132,9 @@ class MongoDBClient:
             
         Returns:
             List of document chunks
-        """
+        """        
         try:
-            if not self.chunks:
+            if self.chunks is None:
                 logger.error("MongoDB client not initialized")
                 return []
                 
@@ -149,9 +162,9 @@ class MongoDBClient:
             
         Returns:
             True if successful, False otherwise
-        """
+        """        
         try:
-            if not self.documents:
+            if self.documents is None:
                 logger.error("MongoDB client not initialized")
                 return False
                 
@@ -170,12 +183,12 @@ class MongoDBClient:
                 return False
         except Exception as e:
             logger.error(f"Error updating metadata for document {document_id}: {e}")
-            return False
-
+            return False    
+        
     async def update_chunk_metadata(self, chunk_id: str, metadata: Dict[str, Any]) -> bool:
         """
         Update a chunk's metadata
-        
+
         Args:
             chunk_id: The chunk ID
             metadata: Updated metadata dictionary
@@ -184,13 +197,18 @@ class MongoDBClient:
             True if successful, False otherwise
         """
         try:
-            if not self.chunks:
+            if self.chunks is None:
                 logger.error("MongoDB client not initialized")
                 return False
-                
-            # Update chunk metadata
+            
+            # Convert string ID to ObjectId if valid format
+            chunk_obj_id = chunk_id
+            if ObjectId.is_valid(chunk_id):
+                chunk_obj_id = ObjectId(chunk_id)
+            
+            # Update chunk metadata - try both id and _id fields
             result = await self.chunks.update_one(
-                {"chunk_id": chunk_id},
+                {"$or": [{"id": chunk_id}, {"_id": chunk_obj_id}]},
                 {"$set": {"metadata": metadata, "updated_at": asyncio.get_event_loop().time()}},
                 upsert=False  # Don't create new chunks
             )
@@ -203,8 +221,8 @@ class MongoDBClient:
                 return False
         except Exception as e:
             logger.error(f"Error updating metadata for chunk {chunk_id}: {e}")
-            return False
-
+            return False   
+            
     async def update_document_and_chunks(
         self, 
         document_id: str, 
@@ -221,17 +239,22 @@ class MongoDBClient:
             
         Returns:
             True if successful, False otherwise
-        """
+        """        
         try:
-            if not self.documents or not self.chunks:
+            if self.documents is None or self.chunks is None:
                 logger.error("MongoDB client not initialized")
                 return False
+
+            # Convert document ID to ObjectId if valid format
+            doc_id = document_id
+            if ObjectId.is_valid(document_id):
+                doc_id = ObjectId(document_id)
 
             # Update document metadata if provided
             doc_updated = False
             if document_metadata:
                 doc_result = await self.documents.update_one(
-                    {"document_id": document_id},
+                    {"_id": doc_id},
                     {"$set": {"metadata": document_metadata, "updated_at": asyncio.get_event_loop().time()}},
                     upsert=True
                 )
@@ -246,9 +269,14 @@ class MongoDBClient:
                     
                     if not chunk_id or not metadata:
                         continue
+                    
+                    # Convert chunk ID to ObjectId if valid format
+                    chunk_obj_id = chunk_id
+                    if ObjectId.is_valid(chunk_id):
+                        chunk_obj_id = ObjectId(chunk_id)
                         
                     result = await self.chunks.update_one(
-                        {"chunk_id": chunk_id},
+                        {"$or": [{"id": chunk_id}, {"_id": chunk_obj_id}]},
                         {"$set": {"metadata": metadata, "updated_at": asyncio.get_event_loop().time()}},
                         upsert=False
                     )
@@ -266,8 +294,8 @@ class MongoDBClient:
                 
         except Exception as e:
             logger.error(f"Error updating document {document_id} and chunks: {e}")
-            return False
-
+            return False    
+      
     async def save_document_topics(
         self, 
         document_id: str,
@@ -275,7 +303,7 @@ class MongoDBClient:
         chunk_id: Optional[str] = None
     ) -> bool:
         """
-        Save topics for a document or chunk
+        Save topics for a document chunk by updating the metadata field in chunks collection
         
         Args:
             document_id: The document ID
@@ -284,35 +312,44 @@ class MongoDBClient:
             
         Returns:
             True if successful, False otherwise
-        """
+        """       
         try:
-            if not self.topics:
+            if self.chunks is None:
                 logger.error("MongoDB client not initialized")
                 return False
-                
-            # Create query based on whether chunk_id is provided
-            query = {"document_id": document_id}
+            
+            # Always use the chunks collection
+            collection = self.chunks
+            
             if chunk_id:
-                query["chunk_id"] = chunk_id
-                
-            # Update topics using upsert
-            result = await self.topics.update_one(
+                # Convert chunk ID to ObjectId if valid format
+                chunk_obj_id = chunk_id
+                if ObjectId.is_valid(chunk_id):
+                    chunk_obj_id = ObjectId(chunk_id)
+                    
+                # Query using both id field or _id for compatibility
+                query = {"$or": [{"id": chunk_id}, {"_id": chunk_obj_id}]}
+            else:
+                query = {"document_id": document_id}
+            
+            # Update topics in the metadata field
+            result = await collection.update_one(
                 query,
                 {
                     "$set": {
-                        "topics": topics,
+                        "metadata.topics": topics,
                         "updated_at": asyncio.get_event_loop().time()
                     }
                 },
-                upsert=True
+                upsert=False  # Don't upsert, only update existing chunks
             )
             
             success = (result.modified_count > 0 or result.upserted_id is not None)
             if success:
                 if chunk_id:
-                    logger.info(f"Saved {len(topics)} topics for document {document_id}, chunk {chunk_id}")
+                    logger.info(f"Saved {len(topics)} topics in metadata for document {document_id}, chunk {chunk_id}")
                 else:
-                    logger.info(f"Saved {len(topics)} document-level topics for document {document_id}")
+                    logger.info(f"Saved {len(topics)} topics in metadata for document {document_id}")
             
             return success
                 

@@ -54,12 +54,16 @@ class DocumentService:
         # TODO: Ensure 'UploadFile' and 'DocumentDTO' types are correctly imported/defined if this service
         # is directly exposed to FastAPI routes or similar that use these types.
         return await self.document_management_service.upload_document(file, user_id, metadata)
-                
-    async def get_document_metadata(self, document_id: str) -> Any: # Actual type: DocumentDTO
+    
+    async def get_document(self, document_id: str) -> Any: # Actual type: DocumentDTO
         """Delegates fetching document metadata to the DocumentManagementService."""
         return await self.document_management_service.get_document_metadata(document_id)
+
+    async def get_document_metadata(self, document_id: str) -> Any: # Actual type: DocumentDTO
+        """Alias for get_document for backward compatibility."""
+        return await self.get_document(document_id)
             
-    async def list_documents_metadata(
+    async def list_documents(
         self,
         skip: int = 0,
         limit: int = 100,
@@ -67,21 +71,46 @@ class DocumentService:
     ) -> Tuple[List[Any], int]: # Actual type: List[DocumentDTO]
         """Delegates listing document metadata to the DocumentManagementService."""
         return await self.document_management_service.list_documents_metadata(skip, limit, query_filter)
+    
+    async def list_documents_metadata(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        query_filter: Optional[Dict[str, Any]] = None
+    ) -> Tuple[List[Any], int]: # Actual type: List[DocumentDTO]
+        """Alias for list_documents for backward compatibility."""
+        return await self.list_documents(skip, limit, query_filter)
             
-    async def delete_document_and_data(self, document_id: str) -> bool:
+    async def delete_document(self, document_id: str) -> bool:
         """Delegates document deletion to the DocumentManagementService."""
         return await self.document_management_service.delete_document_and_data(document_id)
+    
+    async def delete_document_and_data(self, document_id: str) -> bool:
+        """Alias for delete_document for backward compatibility."""
+        return await self.delete_document(document_id)
             
-    async def download_document_file(self, document_id: str) -> Tuple[BinaryIO, str, str]:
+    async def download_document(self, document_id: str) -> Tuple[BinaryIO, str, str]:
         """Delegates document file download to the DocumentManagementService."""
         return await self.document_management_service.download_document_file(document_id)
-            
-    async def get_document_chunks_data(self, document_id: str) -> List[Any]: # Actual type: List[ChunkDTO]
+        
+    async def download_document_file(self, document_id: str) -> Tuple[BinaryIO, str, str]:
+        """Alias for download_document for backward compatibility."""
+        return await self.download_document(document_id)
+    
+    async def get_document_chunks(self, document_id: str) -> List[Any]: # Actual type: List[ChunkDTO]
         """Delegates fetching document chunks to the DocumentManagementService."""
         return await self.document_management_service.get_document_chunks_data(document_id)
-
-    # Note: _process_document, _chunk_document, convert_to_pdf, and _document_to_dto
+        
+    async def get_document_chunks_data(self, document_id: str) -> List[Any]: # Actual type: List[ChunkDTO]
+        """Alias for get_document_chunks for backward compatibility."""
+        return await self.get_document_chunks(document_id)  
+      
+    async def convert_to_pdf(self, file: Any) -> Tuple[bytes, str]:
+        """Delegates document conversion to PDF to the DocumentManagementService."""
+        pdf_content, pdf_filename = await self.document_management_service._convert_to_pdf_internal(file)
+        return pdf_content, pdf_filename
+        
+    # Note: _process_document, _chunk_document, and _document_to_dto
     # have been moved to BackgroundDocumentProcessor or DocumentManagementService (as internal methods).
-    # The main DocumentService no longer directly implements these low-level details.
-    # If there are other high-level orchestration tasks that don't fit into DocumentManagementService
-    # or BackgroundDocumentProcessor, they could reside here.
+    # The main DocumentService now implements facade methods that match the endpoints in main.py
+    # by delegating to specialized services.

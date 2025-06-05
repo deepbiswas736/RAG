@@ -19,11 +19,10 @@ logger = logging.getLogger(__name__)
 
 class OllamaTextGeneration(TextGenerationService):
     """Text generation service implementation using Ollama"""
-    
     def __init__(self):
         """Initialize the Ollama text generation service"""
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-        self.default_model = os.getenv("OLLAMA_DEFAULT_MODEL", "llama2")
+        self.default_model = os.getenv("OLLAMA_DEFAULT_MODEL", "phi")
         self.request_timeout = float(os.getenv("OLLAMA_TIMEOUT", "30.0"))
         self.fallback_mode = False
         
@@ -222,11 +221,10 @@ class OllamaTextGeneration(TextGenerationService):
 
 class OllamaEmbedding(EmbeddingService):
     """Embedding service implementation using Ollama"""
-    
     def __init__(self):
         """Initialize the Ollama embedding service"""
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-        self.default_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+        self.default_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "phi")
         self.request_timeout = float(os.getenv("OLLAMA_TIMEOUT", "30.0"))
         self.fallback_mode = False
         

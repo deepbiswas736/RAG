@@ -88,12 +88,12 @@ export default function DocumentsPage() {
                   <tr key={doc.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
-                        {doc.title || doc.file || `Document ${doc.id}`}
+                        {doc.name || doc.file || `Document ${doc.id}`}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
-                        onClick={() => downloadDocument(doc.id, doc.title)}
+                        onClick={() => downloadDocument(doc.id, doc.name)}
                         className="text-blue-600 hover:text-blue-900 mr-4"
                         disabled={isLoading}
                       >

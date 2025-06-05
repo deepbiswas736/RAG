@@ -7,7 +7,7 @@ Service to generate summaries and extract metadata from documents
 import logging
 import re
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -159,54 +159,145 @@ Return the information in a structured JSON format:
   "related_entity": "The main person, organization, or item this document is about (e.g., John Doe, Acme Corp, 123 Main St). If not applicable, use 'N/A'."
 }}
 ```
-"""
+"""    
 
-    def _parse_document_summary_from_llm_output(self, llm_output: str) -> Dict[str, Any]:
+    def _parse_document_summary_from_llm_output(self, llm_output) -> Dict[str, Any]:
         """
         Parse the document summary, category, and related entity from LLM output
         
         Args:
-            llm_output: Text output from LLM
+            llm_output: Output from LLM (string or dictionary)
             
         Returns:
             Dictionary with parsed summary metadata
         """
         try:
-            json_match = re.search(r'```json\s*(.*?)\s*```', llm_output, re.DOTALL)
+            # Handle dictionary response (from LLM service)
+            if isinstance(llm_output, dict):
+                logger.debug("LLM output is a dictionary, extracting text field")
+                # If it's a dictionary, extract the text field
+                if "text" in llm_output:
+                    text_content = llm_output["text"]
+                else:
+                    logger.warning("Dictionary LLM output missing 'text' field")
+                    return {"description": "Error: Invalid response format", "category": "unknown", "related_entity": "N/A"}
+            else:
+                # It's a string
+                text_content = llm_output
+            
+            # First try to find JSON block with markdown formatting
+            json_match = re.search(r'```json\s*(.*?)\s*```', text_content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
-                data = json.loads(json_str)
-                return {
-                    "description": data.get("description", "N/A"),
-                    "category": data.get("category", "other"),
-                    "related_entity": data.get("related_entity", "N/A")
-                }
+                try:
+                    data = json.loads(json_str)
+                    return {
+                        "description": data.get("description", "N/A"),
+                        "category": data.get("category", "other"),
+                        "related_entity": data.get("related_entity", "N/A")
+                    }
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Found JSON block but couldn't parse it: {e}")
+                    # Continue to next JSON extraction attempt
             
-            # If no JSON found, try to extract information from text
+            # Next try to find any JSON object in the text (without markdown formatting)
+            try:
+                # Find the outermost JSON object in the response
+                start_index = text_content.find('{')
+                if start_index != -1:
+                    # Try to find the matching closing brace
+                    json_str = None
+                    brace_count = 0
+                    for i in range(start_index, len(text_content)):
+                        if text_content[i] == '{':
+                            brace_count += 1
+                        elif text_content[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                # Found complete JSON object
+                                json_str = text_content[start_index:i+1]
+                                break
+                    
+                    # If we found what looks like a complete JSON object, try to parse it
+                    if json_str:
+                        try:
+                            data = json.loads(json_str)
+                            return {
+                                "description": data.get("description", "N/A"),
+                                "category": data.get("category", "other"),
+                                "related_entity": data.get("related_entity", "N/A")
+                            }
+                        except json.JSONDecodeError:
+                            # If the complete JSON didn't parse, try a simpler approach
+                            # Take just the substring from { to the last }
+                            simple_json_str = text_content[start_index:text_content.rfind('}')+1]
+                            try:
+                                data = json.loads(simple_json_str)
+                                return {
+                                    "description": data.get("description", "N/A"),
+                                    "category": data.get("category", "other"),
+                                    "related_entity": data.get("related_entity", "N/A")
+                                }
+                            except json.JSONDecodeError:
+                                logger.warning("Failed to parse JSON even with simplified extraction")
+            except Exception as extraction_error:
+                logger.warning(f"Error during JSON extraction attempt: {extraction_error}")
+              # If JSON extraction failed, try to extract information from text
             logger.warning(f"Could not parse JSON summary from LLM output, trying text extraction")
             
+            # As a fallback, extract directly from the incomplete JSON or raw text
+            # First try to find what looks like JSON key-value pairs
             description = "N/A"
             category = "unknown"
             entity = "N/A"
             
-            # Simple extraction based on common patterns
-            if "description:" in llm_output.lower():
-                description_match = re.search(r'description:(.+?)(?=category:|related_entity:|$)', llm_output, re.IGNORECASE | re.DOTALL)
+            # Extract using direct regex for JSON key-value pairs
+            description_match = re.search(r'"description"\s*:\s*"([^"]+)"', text_content)
+            if description_match:
+                description = description_match.group(1).strip()
+            
+            category_match = re.search(r'"category"\s*:\s*"([^"]+)"', text_content)
+            if category_match:
+                category = category_match.group(1).strip()
+            
+            entity_match = re.search(r'"related_entity"\s*:\s*"([^"]+)"', text_content)
+            if entity_match:
+                entity = entity_match.group(1).strip()
+                
+            # If we found at least one field, return it
+            if description != "N/A" or category != "unknown" or entity != "N/A":
+                logger.info(f"Successfully extracted metadata from JSON-like text: {description[:30]}...")
+                return {"description": description, "category": category, "related_entity": entity}
+            
+            # If no JSON-like extraction worked, try plain text patterns
+            logger.info("Attempting plain text extraction")
+            if "description:" in text_content.lower():
+                description_match = re.search(r'description:(.+?)(?=category:|related_entity:|$)', text_content, re.IGNORECASE | re.DOTALL)
                 if description_match:
                     description = description_match.group(1).strip()
             
-            if "category:" in llm_output.lower():
-                category_match = re.search(r'category:(.+?)(?=description:|related_entity:|$)', llm_output, re.IGNORECASE | re.DOTALL)
+            if "category:" in text_content.lower():
+                category_match = re.search(r'category:(.+?)(?=description:|related_entity:|$)', text_content, re.IGNORECASE | re.DOTALL)
                 if category_match:
                     category = category_match.group(1).strip()
             
-            if "related_entity:" in llm_output.lower() or "entity:" in llm_output.lower():
-                entity_match = re.search(r'(?:related_)?entity:(.+?)(?=description:|category:|$)', llm_output, re.IGNORECASE | re.DOTALL)
+            if "related_entity:" in text_content.lower() or "entity:" in text_content.lower():
+                entity_match = re.search(r'(?:related_)?entity:(.+?)(?=description:|category:|$)', text_content, re.IGNORECASE | re.DOTALL)
                 if entity_match:
                     entity = entity_match.group(1).strip()
+                    
+            # If nothing worked, use the content itself as the description
+            if description == "N/A" and len(text_content.strip()) > 0:
+                # Find the first substantial line (non-empty, not just brackets or quotes)
+                lines = [l.strip() for l in text_content.split("\n") if len(l.strip()) > 3 and not all(c in '{}[]"' for c in l.strip())]
+                if lines:
+                    description = lines[0][:100]  # Use the first substantial line as description
+                else:
+                    # Just use the first 100 chars of content
+                    description = text_content.strip()[:100]
             
             return {"description": description, "category": category, "related_entity": entity}
             
         except Exception as e:
-            logger.error(f"Error parsing document summary from LLM output: {e}. Output: {llm_output}")
+            logger.error(f"Error parsing document summary from LLM output: {e}. Output type: {type(llm_output)}")
             return {"description": "Error in parsing summary", "category": "unknown", "related_entity": "N/A"}

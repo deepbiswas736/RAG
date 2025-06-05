@@ -20,7 +20,7 @@ from .application.services.llm_service import LLMService
 
 # Import infrastructure implementations
 from .infrastructure.llm.ollama_adapter import OllamaTextGeneration, OllamaEmbedding
-from .infrastructure.messaging.metadata_consumer import MetadataConsumerService
+from .infrastructure.messaging.refactored_metadata_consumer import MetadataConsumerService
 
 # Import Kafka debug helpers
 # Try to import directly, assuming kafka_utility is in PYTHONPATH or discoverable

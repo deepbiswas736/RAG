@@ -368,6 +368,30 @@ services:
     networks:
       - default
       - rag_observability
+      
+  # UI Application
+  ui:
+    build:
+      context: ./ui
+    ports:
+      - "3001:3000"  # Map host port 3001 to container port 3000 to avoid conflict with Grafana
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ui.rule=PathPrefix(`/`)"
+      - "traefik.http.services.ui.loadbalancer.server.port=3000"
+      - "traefik.http.routers.ui.priority=1"  # Lower priority than API routes
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost  # Base URL for API calls
+      - NEXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
+      - NEXT_PUBLIC_QUERY_SERVICE_URL=/api/query
+      - NEXT_PUBLIC_LLM_SERVICE_URL=/api/llm
+    depends_on:
+      - traefik
+      - document-service
+      - query-service
+      - llm-service
+    networks:
+      - default
 
 volumes:
   mongo_app_data: # Changed volume name here
