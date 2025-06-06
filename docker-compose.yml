@@ -210,21 +210,27 @@ services:
     depends_on:
       - traefik
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"] # Changed port
-  # Query Service needs to be fixed
+        test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"] # Changed port
+  
+  # Query Service
   query-service:
     build: 
       context: ./microservices/query-service
+    ports:
+      - "8003:8003"  # Expose query-service port only for development/debugging
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.query-service.rule=PathPrefix(`/api/query`)"
-      - "traefik.http.services.query-service.loadbalancer.server.port=8003" # Changed port
+      - "traefik.http.services.query-service.loadbalancer.server.port=8003" 
       - "traefik.http.middlewares.query-service-stripprefix.stripprefix.prefixes=/api/query"
       - "traefik.http.routers.query-service.middlewares=query-service-stripprefix"
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - MONGO_URI=mongodb://user:password@mongodb:27017/rag_db?authSource=admin&replicaSet=rs0&retryWrites=true
-      - LLM_SERVICE_URL=http://llm-service:8002 
+      - MONGODB_URL=mongodb://user:password@mongodb:27017/rag_db?authSource=admin&replicaSet=rs0&retryWrites=true
+      - MONGODB_DB_NAME=rag_db
+      - LLM_SERVICE_URL=http://llm-service:8002
+      - DOCUMENT_SERVICE_URL=http://document-service:8000
+      - SERVICE_NAME=query-service  # For service discovery
     depends_on:
       - kafka
       - mongodb
@@ -235,6 +241,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - default
+      - internal_services
       
   # Kafka UI for monitoring
   kafka-ui:
@@ -368,8 +377,7 @@ services:
     networks:
       - default
       - rag_observability
-      
-  # UI Application
+        # UI Application
   ui:
     build:
       context: ./ui
@@ -381,10 +389,16 @@ services:
       - "traefik.http.services.ui.loadbalancer.server.port=3000"
       - "traefik.http.routers.ui.priority=1"  # Lower priority than API routes
     environment:
+      # Client-side environment variables (for browser)
       - NEXT_PUBLIC_API_URL=http://localhost  # Base URL for API calls
       - NEXT_PUBLIC_DOCUMENT_SERVICE_URL=/api/documents
       - NEXT_PUBLIC_QUERY_SERVICE_URL=/api/query
       - NEXT_PUBLIC_LLM_SERVICE_URL=/api/llm
+      # Server-side environment variables (for Next.js API routes)
+      - QUERY_SERVICE_URL=http://query-service:8003
+      - DOCUMENT_SERVICE_URL=http://document-service:8000
+      - LLM_SERVICE_URL=http://llm-service:8002
+      - USE_TRAEFIK_ROUTING=false
     depends_on:
       - traefik
       - document-service
@@ -392,6 +406,9 @@ services:
       - llm-service
     networks:
       - default
+      - internal_services
+
+
 
 volumes:
   mongo_app_data: # Changed volume name here
@@ -407,7 +424,12 @@ volumes:
 networks:
   default:
     driver: bridge
+  internal_services:
+    # Internal network for service-to-service communication
+    internal: true
+    driver: bridge
   rag_observability:
     # external: true # Removed to make the compose file self-contained
     name: rag_observability
     driver: bridge
+

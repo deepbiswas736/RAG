@@ -16,4 +16,4 @@ EXPOSE 8003
 ENV PYTHONPATH=/app
 
 # Command to run the application
-CMD ["python", "-m", "uvicorn", "simple_main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

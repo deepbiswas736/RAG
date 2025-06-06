@@ -15,17 +15,16 @@ export interface ApiServiceError {
 
 // DTOs based on the Python backend
 export interface DocumentDTO {
-  id: string; // Assuming 'id' is the primary identifier, could be '_id'
+  id: string; 
   filename: string;
   content_type: string;
   size: number;
-  upload_date: string; // Consider using Date type and parsing
+  upload_date: string; 
   user_id?: string;
-  metadata?: Record<string, unknown>; // Changed: any to unknown
+  metadata?: Record<string, unknown>; 
   processing_status?: string;
   is_processed?: boolean;
   is_chunked?: boolean;
-  // Add any other fields that are part of DocumentDTO
 }
 
 export interface ListDocumentsParams {
@@ -44,13 +43,7 @@ export interface ListDocumentsResponse {
 }
 
 export interface DocumentChunk {
-  // Define the structure of a chunk based on your backend
-  // For example:
-  // id: string;
-  // document_id: string;
-  // text: string;
-  // order: number;
-  [key: string]: unknown; // Changed: any to unknown
+  [key: string]: unknown;
 }
 
 export interface DocumentChunksResponse {
@@ -64,7 +57,7 @@ async function handleResponse<T>(response: Response, isBlob: boolean = false): P
     let errorText = 'No response body or failed to read response body';
     try {
       errorText = await response.text();
-    } catch (_e) { // Changed e to _e
+    } catch (_e) {
       console.warn('Failed to read error response text', _e);
     }
     console.error(`API Service: Request failed with status: ${response.status}, ${response.statusText}`);
@@ -80,7 +73,7 @@ async function handleResponse<T>(response: Response, isBlob: boolean = false): P
   }
   // Handle cases where response might be empty (e.g., 204 No Content for DELETE)
   if (response.status === 204) {
-    return null as T; // Or an appropriate representation for no content
+    return null as T;
   }
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -97,7 +90,7 @@ async function handleResponse<T>(response: Response, isBlob: boolean = false): P
  * @throws ApiServiceError if the request fails.
  */
 export async function uploadFileToDocumentService(formData: FormData): Promise<DocumentDTO> {
-  const uploadUrl = `${DOC_SERVICE_BASE_URL}/`; // Changed: removed "/documents"
+  const uploadUrl = `${DOC_SERVICE_BASE_URL}/`;
   console.log(`Uploading file to document service: ${uploadUrl}`);
   try {
     const response = await fetch(uploadUrl, {
@@ -105,7 +98,7 @@ export async function uploadFileToDocumentService(formData: FormData): Promise<D
       body: formData,
     });
     return await handleResponse<DocumentDTO>(response);
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -114,7 +107,7 @@ export async function uploadFileToDocumentService(formData: FormData): Promise<D
     throw { 
       error: 'Failed to upload file: Network or unexpected error',
       details: error instanceof Error ? error.message : String(error),
-      status: undefined // Status might not be available for network errors
+      status: undefined
     } as ApiServiceError;
   }
 }
@@ -135,12 +128,12 @@ export async function listDocuments(params?: ListDocumentsParams): Promise<ListD
     });
   }
   const queryString = query.toString();
-  const listUrl = `${DOC_SERVICE_BASE_URL}/${queryString ? '?' + queryString : ''}`; // Changed: removed "/documents"
+  const listUrl = `${DOC_SERVICE_BASE_URL}/${queryString ? '?' + queryString : ''}`;
   console.log(`Listing documents from: ${listUrl}`);
   try {
     const response = await fetch(listUrl, { method: 'GET' });
     return await handleResponse<ListDocumentsResponse>(response);
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -160,12 +153,12 @@ export async function listDocuments(params?: ListDocumentsParams): Promise<ListD
  * @throws ApiServiceError if the request fails.
  */
 export async function getDocumentById(documentId: string): Promise<DocumentDTO> {
-  const getUrl = `${DOC_SERVICE_BASE_URL}/${documentId}`; // Changed: removed "/documents"
+  const getUrl = `${DOC_SERVICE_BASE_URL}/${documentId}`;
   console.log(`Getting document by ID: ${getUrl}`);
   try {
     const response = await fetch(getUrl, { method: 'GET' });
     return await handleResponse<DocumentDTO>(response);
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -185,14 +178,14 @@ export async function getDocumentById(documentId: string): Promise<DocumentDTO> 
  * @throws ApiServiceError if the request fails.
  */
 export async function deleteDocumentById(documentId: string): Promise<{ status: string; message: string } | null> {
-  const deleteUrl = `${DOC_SERVICE_BASE_URL}/${documentId}`; // Changed: removed "/documents"
+  const deleteUrl = `${DOC_SERVICE_BASE_URL}/${documentId}`;
   console.log(`Deleting document by ID: ${deleteUrl}`);
   try {
     const response = await fetch(deleteUrl, { method: 'DELETE' });
     // DELETE might return 200 with body or 204 No Content
     if (response.status === 204) return null;
     return await handleResponse<{ status: string; message: string }>(response);
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -212,15 +205,13 @@ export async function deleteDocumentById(documentId: string): Promise<{ status: 
  * @throws ApiServiceError if the request fails.
  */
 export async function downloadDocumentById(documentId: string): Promise<{ blob: Blob, filename: string }> {
-  const downloadUrl = `${DOC_SERVICE_BASE_URL}/${documentId}/download`; // Changed: removed "/documents"
+  const downloadUrl = `${DOC_SERVICE_BASE_URL}/${documentId}/download`;
   console.log(`Downloading document from: ${downloadUrl}`);
   try {
     const response = await fetch(downloadUrl, { method: 'GET' });
     if (!response.ok) {
-      // Use handleResponse for consistent error throwing, but it expects JSON by default
-      // So we manually throw for non-ok blob responses before calling handleResponse
       let errorText = 'Failed to download file';
-      try { errorText = await response.text(); } catch {} // Removed _e
+      try { errorText = await response.text(); } catch {}
       throw {
         error: `Download failed: ${response.statusText}`,
         details: errorText,
@@ -237,7 +228,7 @@ export async function downloadDocumentById(documentId: string): Promise<{ blob: 
       }
     }
     return { blob, filename };
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -257,12 +248,12 @@ export async function downloadDocumentById(documentId: string): Promise<{ blob: 
  * @throws ApiServiceError if the request fails.
  */
 export async function getDocumentChunks(documentId: string): Promise<DocumentChunksResponse> {
-  const chunksUrl = `${DOC_SERVICE_BASE_URL}/${documentId}/chunks`; // Changed: removed "/documents"
+  const chunksUrl = `${DOC_SERVICE_BASE_URL}/${documentId}/chunks`;
   console.log(`Getting document chunks from: ${chunksUrl}`);
   try {
     const response = await fetch(chunksUrl, { method: 'GET' });
     return await handleResponse<DocumentChunksResponse>(response);
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -282,7 +273,7 @@ export async function getDocumentChunks(documentId: string): Promise<DocumentChu
  * @throws ApiServiceError if the request fails.
  */
 export async function convertFileToPdf(file: File): Promise<{ blob: Blob, filename: string }> {
-  const convertUrl = `${DOC_SERVICE_BASE_URL}/convert`; // Changed: removed "/documents"
+  const convertUrl = `${DOC_SERVICE_BASE_URL}/convert`;
   console.log(`Converting file to PDF: ${convertUrl}`);
   const formData = new FormData();
   formData.append('file', file);
@@ -294,7 +285,7 @@ export async function convertFileToPdf(file: File): Promise<{ blob: Blob, filena
     });
     if (!response.ok) {
       let errorText = 'Failed to convert file to PDF';
-      try { errorText = await response.text(); } catch {} // Removed _e
+      try { errorText = await response.text(); } catch {}
       throw {
         error: `PDF conversion failed: ${response.statusText}`,
         details: errorText,
@@ -311,7 +302,7 @@ export async function convertFileToPdf(file: File): Promise<{ blob: Blob, filena
       }
     }
     return { blob, filename };
-  } catch (error: unknown) { // Changed any to unknown
+  } catch (error: unknown) {
     if (error && typeof error === 'object' && 'status' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status) throw apiError; 
@@ -330,7 +321,7 @@ export async function convertFileToPdf(file: File): Promise<{ blob: Blob, filena
  * @returns The JSON response from the server.
  * @throws ApiServiceError if the request fails.
  */
-export async function submitAsyncQuery(payload: { query: string }): Promise<unknown> { // Changed any to unknown
+export async function submitAsyncQuery(payload: { query: string }): Promise<unknown> {
   const queryUrl = `${QUERY_SERVICE_URL}/async`; // Query service's async endpoint
   console.log(`Submitting async query to: ${queryUrl} with payload:`, payload);
 
@@ -342,9 +333,9 @@ export async function submitAsyncQuery(payload: { query: string }): Promise<unkn
       },
       body: JSON.stringify(payload),
     });
-    return await handleResponse<unknown>(response); // Changed any to unknown
-  } catch (error: unknown) { // Changed any to unknown
-    if (error && typeof error === 'object' && 'status' in error && 'error' in error) { // Added type check for error property
+    return await handleResponse<unknown>(response);
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'status' in error && 'error' in error) {
         const apiError = error as ApiServiceError;
         if (apiError.status && apiError.error) throw apiError; 
     }
@@ -352,7 +343,54 @@ export async function submitAsyncQuery(payload: { query: string }): Promise<unkn
     throw {
       error: 'Failed to submit async query: Network or unexpected error',
       details: error instanceof Error ? error.message : String(error),
-      status: undefined // Status might not be available for network errors
+      status: undefined
+    } as ApiServiceError;
+  }
+}
+
+/**
+ * Submits a streaming query to the query service.
+ * @param payload The query payload, e.g., { query: string }.
+ * @returns The raw Response object for streaming.
+ * @throws ApiServiceError if the request fails.
+ */
+export async function submitStreamingQuery(payload: { query: string }): Promise<Response> {
+  const queryUrl = `${QUERY_SERVICE_URL}/stream`; // Query service's streaming endpoint
+  console.log(`Submitting streaming query to: ${queryUrl} with payload:`, payload);
+
+  try {
+    const response = await fetch(queryUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: payload.query,
+        query_type: "hybrid",
+      }),
+    });
+
+    if (!response.ok) {
+      let errorText = 'Failed to submit streaming query';
+      try { errorText = await response.text(); } catch {}
+      throw {
+        error: `Streaming query failed: ${response.statusText}`,
+        details: errorText,
+        status: response.status,
+      } as ApiServiceError;
+    }
+
+    return response;
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'status' in error && 'error' in error) {
+      const apiError = error as ApiServiceError;
+      if (apiError.status && apiError.error) throw apiError;
+    }
+    console.error('API Service: Error submitting streaming query:', error);
+    throw {
+      error: 'Failed to submit streaming query: Network or unexpected error',
+      details: error instanceof Error ? error.message : String(error),
+      status: undefined
     } as ApiServiceError;
   }
 }

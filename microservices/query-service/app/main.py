@@ -5,6 +5,7 @@ FastAPI implementation of the Query Service API
 """
 
 import os
+import sys
 import logging
 import json
 import socket
@@ -17,35 +18,39 @@ import asyncio
 import uvicorn
 import uuid
 
-# Configure OpenTelemetry Logging
-OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "query-service")
-OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4317")
-OTEL_PYTHON_LOG_LEVEL_STR = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
-otel_log_level = getattr(logging, OTEL_PYTHON_LOG_LEVEL_STR, logging.INFO)
+# Configure OpenTelemetry Logging - Temporarily disabled due to import issues
+# OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "query-service")
+# OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://otel-collector:4317")
+# OTEL_PYTHON_LOG_LEVEL_STR = os.environ.get("OTEL_PYTHON_LOG_LEVEL", "INFO").upper()
+# otel_log_level = getattr(logging, OTEL_PYTHON_LOG_LEVEL_STR, logging.INFO)
 
-from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
-from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk.logs.export import BatchLogRecordProcessor
-from opentelemetry.sdk.resources import Resource
+# from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+# from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+# from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+# from opentelemetry.sdk.resources import Resource
 
-logger_provider = LoggerProvider(
-    resource=Resource.create({"service.name": OTEL_SERVICE_NAME})
-)
-otlp_log_exporter = OTLPLogExporter(endpoint=OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, insecure=True)
-logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
-logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
+# logger_provider = LoggerProvider(
+#     resource=Resource.create({"service.name": OTEL_SERVICE_NAME})
+# )
+# otlp_log_exporter = OTLPLogExporter(endpoint=OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, insecure=True)
+# logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
+# logging.getLogger().addHandler(LoggingHandler(level=otel_log_level, logger_provider=logger_provider))
 # logging.getLogger().setLevel(otel_log_level)
 
 # Use absolute imports instead of relative imports
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+
 import config
 from application.services.query_processor import QueryProcessor
-from .domain.models.query import Query, QueryType
-from .domain.interfaces.query_repository import QueryRepository
-from .domain.interfaces.llm_service_client import LLMServiceClient
-from .domain.interfaces.document_service_client import DocumentServiceClient
-from .infrastructure.persistence.mongodb_query_repository import MongoDBQueryRepository
-from .infrastructure.adapters.http_llm_service_client import HttpLLMServiceClient
-from .infrastructure.adapters.http_document_service_client import HttpDocumentServiceClient
+from domain.models.query import Query, QueryType
+from domain.interfaces.query_repository import QueryRepository
+from domain.interfaces.llm_service_client import LLMServiceClient
+from domain.interfaces.document_service_client import DocumentServiceClient
+from infrastructure.persistence.mongodb_query_repository import MongoDBQueryRepository
+from infrastructure.adapters.http_llm_service_client import HttpLLMServiceClient
+from infrastructure.adapters.http_document_service_client import HttpDocumentServiceClient
 import json
 
 # Configure logging
@@ -105,7 +110,7 @@ class StreamingResponseModel(BaseModel):
 class ApiConfig:
     # MongoDB connection
     MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://mongodb:27017")
-    MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "query_db")
+    MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "rag_db")
     
     # Service URLs
     LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://llm-service:8001")
@@ -138,7 +143,7 @@ app.add_middleware(
 def get_query_repository() -> QueryRepository:
     """Get query repository instance"""
     repository = MongoDBQueryRepository(
-        connection_url=config.MONGODB_URL,
+        connection_string=config.MONGODB_URL,
         database_name=config.MONGODB_DB_NAME
     )
     return repository
@@ -339,8 +344,8 @@ async def get_query_result(
 ):
     """Get the result of a query by ID"""
     try:
-        from .domain.models.query import QueryId
-        from .domain.models.response import ResponseId
+        from domain.models.query import QueryId
+        from domain.models.response import ResponseId
         
         # Find responses for the query
         responses = await query_repository.find_responses_by_query_id(QueryId(value=query_id))
@@ -398,9 +403,8 @@ async def get_conversation_history(
         history = []
         for query in queries:
             query_dict = query.to_dict()
-            
-            # Find responses for this query
-            from .domain.models.query import QueryId
+              # Find responses for this query
+            from domain.models.query import QueryId
             responses = await query_repository.find_responses_by_query_id(QueryId(value=query.id.value))
             
             if responses:
@@ -428,4 +432,4 @@ async def get_conversation_history(
 
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8003, reload=True)

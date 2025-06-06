@@ -23,7 +23,7 @@ DOCUMENT_SERVICE_TIMEOUT = float(os.getenv("DOCUMENT_SERVICE_TIMEOUT", "30.0"))
 
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://user:password@mongodb:27017")
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "query_db")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "rag_db")
 MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "queries")
 MONGODB_RESPONSE_COLLECTION = os.getenv("MONGODB_RESPONSE_COLLECTION", "responses")
 MONGODB_CONVERSATIONS_COLLECTION = os.getenv("MONGODB_CONVERSATIONS_COLLECTION", "conversations")

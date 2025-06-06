@@ -9,7 +9,7 @@ import logging
 import httpx
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
-from ...domain.interfaces.document_service_client import DocumentServiceClient
+from domain.interfaces.document_service_client import DocumentServiceClient
 
 logger = logging.getLogger(__name__)
 

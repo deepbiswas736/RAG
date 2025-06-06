@@ -13,12 +13,12 @@ from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple
 from datetime import datetime
 from collections import Counter
 
-from ...domain.interfaces.llm_service_client import LLMServiceClient
-from ...domain.interfaces.document_service_client import DocumentServiceClient
-from ...domain.interfaces.query_repository import QueryRepository
-from ...domain.models.query import Query, QueryStatus
-from ...domain.models.response import QueryResponse, DocumentReference
-from ... import config
+from domain.interfaces.llm_service_client import LLMServiceClient
+from domain.interfaces.document_service_client import DocumentServiceClient
+from domain.interfaces.query_repository import QueryRepository
+from domain.models.query import Query, QueryStatus
+from domain.models.response import QueryResponse, DocumentReference
+import config
 
 logger = logging.getLogger(__name__)
 

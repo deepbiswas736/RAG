@@ -8,7 +8,6 @@ export default function SyncQueryPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState("");
   const resultRef = useRef<HTMLDivElement>(null);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
@@ -23,21 +22,74 @@ export default function SyncQueryPage() {
         body: JSON.stringify({ query }),
       });
       
-      // Create a reader for the stream
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("Failed to create stream reader");
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Query failed: ${response.status} - ${errorText}`);
+      }
       
-      // Read the stream
-      const decoder = new TextDecoder();
-      let done = false;
-      
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        // Handle Server-Sent Events (SSE)
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("Failed to create stream reader");
         
-        if (value) {
-          const chunk = decoder.decode(value, { stream: !done });
-          setResult(prev => prev + chunk);
+        // Read the stream
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let done = false;
+        
+        while (!done) {
+          const { value, done: doneReading } = await reader.read();
+          done = doneReading;
+          
+          if (value) {
+            // Decode the chunk and add to buffer
+            const chunk = decoder.decode(value, { stream: !done });
+            buffer += chunk;
+            
+            // Process any complete SSE messages
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || ""; // Keep the last incomplete part in buffer
+            
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const jsonData = JSON.parse(line.substring(6));
+                  
+                  if (jsonData.is_error) {
+                    setResult(prev => prev + `\nError: ${jsonData.text}`);
+                  } else {
+                    setResult(prev => prev + jsonData.text);
+                  }
+                    if (jsonData.is_final) {
+                    done = true;
+                  }
+                } catch (e) {
+                  console.error("Error parsing SSE data:", e);
+                  // If not valid JSON, just append the text
+                  const textData = line.substring(6);
+                  setResult(prev => prev + textData);
+                }
+              }
+            }
+          }
+        }
+      } else {
+        // Fallback for non-SSE responses
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("Failed to create stream reader");
+        
+        // Read the stream
+        const decoder = new TextDecoder();
+        let done = false;
+        
+        while (!done) {
+          const { value, done: doneReading } = await reader.read();
+          done = doneReading;
+          
+          if (value) {
+            const chunk = decoder.decode(value, { stream: !done });
+            setResult(prev => prev + chunk);
+          }
         }
       }
     } catch (error) {

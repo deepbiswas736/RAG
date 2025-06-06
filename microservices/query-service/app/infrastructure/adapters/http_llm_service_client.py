@@ -9,7 +9,7 @@ import json
 import logging
 import httpx
 from typing import List, Dict, Any, Optional, AsyncGenerator
-from ...domain.interfaces.llm_service_client import LLMServiceClient
+from domain.interfaces.llm_service_client import LLMServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class HttpLLMServiceClient(LLMServiceClient):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/llm/generate",
+                    f"{self.base_url}/generate",
                     json=payload,
                     timeout=self.timeout
                 )
@@ -96,7 +96,7 @@ class HttpLLMServiceClient(LLMServiceClient):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/embeddings/create",
+                    f"{self.base_url}/embeddings",
                     json=payload,
                     timeout=self.timeout
                 )
@@ -150,7 +150,7 @@ class HttpLLMServiceClient(LLMServiceClient):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/embeddings/create",
+                    f"{self.base_url}/embeddings",
                     json=payload,
                     timeout=self.timeout
                 )
@@ -201,7 +201,7 @@ class HttpLLMServiceClient(LLMServiceClient):
             async with httpx.AsyncClient() as client:
                 async with client.stream(
                     "POST",
-                    f"{self.base_url}/llm/stream",
+                    f"{self.base_url}/generate/stream",
                     json=payload,
                     timeout=self.timeout
                 ) as response:
@@ -213,7 +213,12 @@ class HttpLLMServiceClient(LLMServiceClient):
                     async for line in response.aiter_lines():
                         if line.strip():
                             try:
-                                yield json.loads(line)
+                                # Parse streaming response format "data: {json}"
+                                if line.startswith("data: "):
+                                    json_data = line[6:]  # Remove "data: " prefix
+                                    yield json.loads(json_data)
+                                else:
+                                    yield json.loads(line)
                             except json.JSONDecodeError as e:
                                 logger.error(f"Error parsing streaming response: {e}")
         except Exception as e:
@@ -226,30 +231,7 @@ class HttpLLMServiceClient(LLMServiceClient):
         """
         Create an embedding using the LLM Service
         """
-        payload = {
-            "text": text
-        }
-        
-        if model is not None:
-            payload["model"] = model
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/llm/embeddings",
-                    json=payload,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    error_message = f"LLM Service error: {response.status_code} - {response.text}"
-                    logger.error(error_message)
-                    raise Exception(error_message)
-        except Exception as e:
-            logger.error(f"Error communicating with LLM Service: {str(e)}")
-            raise
+        return await self.generate_embeddings(text, model)
     
     async def create_batch_embeddings(self, 
                                     texts: List[str],
@@ -257,30 +239,11 @@ class HttpLLMServiceClient(LLMServiceClient):
         """
         Create batch embeddings using the LLM Service
         """
-        payload = {
-            "texts": texts
-        }
-        
-        if model is not None:
-            payload["model"] = model
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/llm/batch_embeddings",
-                    json=payload,
-                    timeout=self.timeout
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    error_message = f"LLM Service error: {response.status_code} - {response.text}"
-                    logger.error(error_message)
-                    raise Exception(error_message)
-        except Exception as e:
-            logger.error(f"Error communicating with LLM Service: {str(e)}")
-            raise
+        results = []
+        for text in texts:
+            result = await self.generate_embeddings(text, model)
+            results.append(result)
+        return results
     
     async def check_health(self) -> Dict[str, Any]:
         """

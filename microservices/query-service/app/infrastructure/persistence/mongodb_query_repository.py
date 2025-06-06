@@ -10,9 +10,9 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
-from ...domain.interfaces.query_repository import QueryRepository
-from ...domain.models.query import Query, QueryId, QueryStatus
-from ...domain.models.response import QueryResponse, ResponseId
+from domain.interfaces.query_repository import QueryRepository
+from domain.models.query import Query, QueryId, QueryStatus
+from domain.models.response import QueryResponse, ResponseId
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ class MongoDBQueryRepository(QueryRepository):
         self.connection_string: str = os.environ.get("MONGO_URI") or \
                                  os.environ.get("MONGODB_URL") or \
                                  connection_string or \
-                                 "mongodb://user:password@mongodb:27017/query_db?authSource=admin&replicaSet=rs0&retryWrites=true"
+                                 "mongodb://user:password@mongodb:27017/rag_db?authSource=admin&replicaSet=rs0&retryWrites=true"
         
-        self.database_name: str = database_name or os.environ.get("MONGODB_DB_NAME", "query_db")
+        self.database_name: str = database_name or os.environ.get("MONGODB_DB_NAME", "rag_db")
         
         self.client: Any = None # Simplified type hint
         self.db: Any = None # Simplified type hint
